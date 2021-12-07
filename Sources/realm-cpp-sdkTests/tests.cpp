@@ -1,5 +1,4 @@
 #include <sdk.hpp>
-#import <XCTest/XCTest.h>
 
 struct Dog: realm::sdk::Object {
     realm::sdk::Persisted<std::string> name;
@@ -29,37 +28,46 @@ struct Person: realm::sdk::Object {
     }
 };
 
-@interface TestMain : XCTestCase
-@end
+static auto success_count = 0;
+static auto fail_count = 0;
+template <typename T, typename V>
+bool assert_equals(const T& a, const V& b)
+{
+    if (a == b) { success_count += 1; }
+    else { fail_count += 1; }
+    return a == b;
+}
+#define assert_equals(a, b) \
+if (!assert_equals(a, b)) {\
+std::cout<<__FILE__<<"L"<<__LINE__<<":"<<#a<<" did not equal "<<#b<<std::endl;\
+}
 
-@implementation TestMain
-
-- (void)testAll {
+realm::sdk::task<void> run() {
     auto realm = realm::sdk::Realm<Person, Dog>();
 
     auto person = Person();
     person.name = "John";
     person.age = 17;
     person.dog = Dog{.name = "Fido"};
-
+    person.age -= 2;
     realm.write([&realm, &person] {
         realm.add(person);
     });
 
-    XCTAssertEqual(*person.name, "John");
-    XCTAssertEqual(*person.age, 17);
+    assert_equals(*person.name, "John");
+    assert_equals(*person.age, 15);
     auto dog = **person.dog;
-    std::cout<<*dog.name<<std::endl;
-    XCTAssertEqual(*dog.name, "Fido");
+    assert_equals(*dog.name, "Fido");
 
     realm.write([&person] {
         person.age = 21;
+        person.age -= 2;
     });
 
-    XCTAssertEqual(*person.age, 21);
+    assert_equals(*person.age, 19);
 
     auto persons = realm.objects<Person>();
-    XCTAssertEqual(persons.size(), 1);
+    assert_equals(persons.size(), 1);
 
     std::vector<Person> people;
     std::copy(persons.begin(), persons.end(), std::back_inserter(people));
@@ -69,18 +77,21 @@ struct Person: realm::sdk::Object {
         });
     }
 
-    XCTAssertEqual(persons.size(), 0);
-}
+    assert_equals(persons.size(), 0);
+    auto app = realm::sdk::App("todo-cqenc");
+    auto user = co_await app.login(realm::sdk::App::Credentials::anonymous());
+    assert(!user.access_token().empty());
+    auto synced_realm = user.realm<Person, Dog>("foo");
 
-@end
+    co_return;
+}
 
 int main() {
-//    auto realm = realm::sdk::Realm({ .schema = {Person::schema()} });
-//
-//    auto person = Person();
-//    person.name = "John";
-//
-//    realm.write([&realm, &person] {
-//        realm.add(person);
-//    });
+    auto task = run();
+    auto coro = task.p->coro();
+    coro.resume();
+    std::cout<<success_count<<"/"<<success_count + fail_count<<" checks completed successfully."<<std::endl;
+    return 0;
 }
+
+//@end

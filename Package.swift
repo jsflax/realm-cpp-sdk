@@ -9,7 +9,6 @@ var cxxSettings: [CXXSetting] = [
     .define("REALM_SPM", to: "1"),
     .define("REALM_PLATFORM_APPLE", to: "1"),
     .define("REALM_ENABLE_SYNC", to: "1"),
-//    .define("REALM_COCOA_VERSION", to: "@\"\(cocoaVersionStr)\""),
     .define("REALM_VERSION", to: "11.6.1"),
 
     .define("REALM_DEBUG", .when(configuration: .debug)),
@@ -23,6 +22,7 @@ var cxxSettings: [CXXSetting] = [
     .define("REALM_VERSION_PATCH", to: "1"),
     .define("REALM_VERSION_EXTRA", to: "\"\""),
     .define("REALM_VERSION_STRING", to: "\"11.6.1\""),
+    .unsafeFlags(["-LDFLAGS=\"-L/usr/local/opt/curl/lib\""], nil)
 ]
 
 #if swift(>=5.5)
@@ -59,22 +59,31 @@ let package = Package(
          .package(url: "https://github.com/realm/realm-core", from: "11.6.1"),
     ],
     targets: [
+        .systemLibrary(
+            name: "libcurl",
+            pkgConfig: "libcurl",
+            providers: [
+                .apt(["libcurl4-openssl-dev"]),
+                .brew(["curl"])
+            ]
+        ),
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
         // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
             name: "realm-cpp-sdk",
-            dependencies: [.product(name: "RealmCore", package: "realm-core")],
+            dependencies: [.product(name: "RealmCore", package: "realm-core"), "libcurl"],
             publicHeadersPath: "include",
             cxxSettings: cxxSettings,
             linkerSettings: [
                 .linkedFramework("Foundation", .when(platforms: [.macOS, .iOS, .tvOS, .watchOS])),
                 .linkedFramework("Security", .when(platforms: [.macOS, .iOS, .tvOS, .watchOS])),
             ]),
-        .testTarget(
+        .executableTarget(
             name: "realm-cpp-sdkTests",
-            dependencies: ["realm-cpp-sdk"],
+            dependencies: ["realm-cpp-sdk", "libcurl"],
             cxxSettings: cxxSettings + [
-                .headerSearchPath("../../Sources/realm-cpp-sdk/include")
+                .headerSearchPath("../../Sources/realm-cpp-sdk/include"),
+                .define("REALM_DISABLE_METADATA_ENCRYPTION")
             ]),
     ],
     cxxLanguageStandard: .cxx20
