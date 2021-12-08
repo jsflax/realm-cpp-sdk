@@ -1,12 +1,12 @@
 #ifndef Header_h
 #define Header_h
 
+#include <any>
 #include <utility>
 #include <filesystem>
 #include <iostream>
 #include <concepts>
 #include <experimental/coroutine>
-
 
 #include <realm/object-store/impl/object_accessor_impl.hpp>
 #include <realm/object-store/shared_realm.hpp>
@@ -14,6 +14,12 @@
 #include <realm/object-store/sync/app.hpp>
 #include <realm/object-store/sync/sync_user.hpp>
 #include <realm/object-store/sync/impl/sync_client.hpp>
+
+#include "jthread.hpp"
+
+#if QT_VERSION
+#include <QStandardPaths>
+#endif
 
 namespace realm {
 class Obj;
@@ -30,6 +36,13 @@ struct persisted_type {};
 template <typename T>
 concept AddAssignable = requires (T a) {
     a += a;
+};
+template <typename T>
+concept Comparable = requires (T a) {
+    a < a;
+    a > a;
+    a <= a;
+    a >= a;
 };
 template <typename T>
 concept IntPersistable = std::is_integral<T>::value && requires(T a) {
@@ -59,8 +72,9 @@ struct persisted_type<T> { using type = double; };
 
 // MARK: Object
 struct Object {
+    template <typename T>
+    friend NotificationToken observe(const T& cls);
     std::shared_ptr<Realm> m_realm = nullptr;
-//private:
     std::shared_ptr<Obj> m_obj = nullptr;
 };
 
@@ -280,12 +294,36 @@ struct Persisted {
             unmanaged -= a;
         }
     }
+    void operator --() requires (IntPersistable<T> || DoublePersistable<T>) {
+        *this -= 1;
+    }
+    T operator -() requires (IntPersistable<T> || DoublePersistable<T>) {
+        return *this * -1;
+    }
     void operator +=(const T& a) requires (AddAssignable<T>) {
         if (m_obj) {
             m_obj->set<type>(managed, *(*this) + a);
         } else {
             unmanaged += a;
         }
+    }
+    T operator *(const T& a) requires (AddAssignable<T>) {
+        return **this * a;
+    }
+    void operator ++() requires (AddAssignable<T>) {
+        *this += 1;
+    }
+    bool operator <(const T& a) requires (Comparable<T>) {
+        return **this < a;
+    }
+    bool operator >(const T& a) requires (Comparable<T>) {
+        return **this > a;
+    }
+    bool operator <=(const T& a) requires (Comparable<T>) {
+        return **this <= a;
+    }
+    bool operator >=(const T& a) requires (Comparable<T>) {
+        return **this >= a;
     }
     union {
         T unmanaged;
@@ -298,7 +336,19 @@ struct Property {
     const char* name;
 };
 
+static constexpr bool streq(char const *a, std::string_view b) {
+    return std::string_view(a) == b;
+}
 // MARK: Property
+template<size_t N>
+struct StringLiteral {
+    constexpr StringLiteral(const char (&str)[N]) {
+        std::copy_n(str, N, value);
+    }
+
+    char value[N];
+};
+
 template<typename Class, typename Result>
 struct property {
     constexpr property(const char* name,
@@ -332,6 +382,9 @@ struct property {
         (object.*ptr).managed = col_key;
     }
 
+    constexpr bool operator ==(std::string_view name) {
+        return streq(this->name, name);
+    }
     const char * name;
     Persisted<Result> Class::*ptr;
     PropertyType type;
@@ -342,16 +395,45 @@ struct ObjectSchema;
 
 template<typename Class, typename ...Result>
 struct Model {
+    static constexpr const char* extract_name(auto&& p) { return p.name; }
+    static constexpr auto name_tuple(property<Class, Result>&... properties) {
+        return std::make_tuple(extract_name(properties)...);
+    }
     constexpr Model(const char* name, property<Class, Result>&& ...properties)
     : name(name)
     , n(sizeof...(Result))
     , props{std::move(properties)...}
     {
+
     }
+
 
     const std::size_t n;
     std::tuple<property<Class, Result>...> props;
     const char * name;
+
+    template <size_t N = 0>
+    static constexpr auto property_for_name(std::tuple<property<Class, Result>...> props, std::string_view name)
+    {
+        if constexpr(N >= sizeof...(Result)) {
+            return;
+        } else {
+            auto names = std::apply([](auto&&... props){
+                return name_tuple(props...);
+            }, props);
+    //         auto o = std::get<N>(props).name;
+            if (std::get<N>(props) == name) {
+                return &std::get<N>(props);
+            } else {
+                return property_for_name<N + 1>(props, name);
+            }
+        }
+    }
+
+    constexpr auto property_for_name(const char* name)
+    {
+        return property_for_name(props, name);
+    }
     explicit operator realm::ObjectSchema() const
     {
         realm::ObjectSchema schema;
@@ -513,10 +595,6 @@ private:
 };
 
 // MARK: App
-#if QT_VERSION
-#include <QStandardPaths>
-#include <QtNetwork>
-#endif
 
 namespace {
 #include <curl/curl.h>
@@ -913,6 +991,7 @@ private:
 
 template <ObjectPersistable ...Ts>
 struct Realm {
+
     struct Config {
         std::string path = std::filesystem::current_path().append("default.realm");
         std::vector<ObjectSchema> schema;
@@ -936,8 +1015,16 @@ struct Realm {
 
     Realm(const Config& config)
     : config(std::move(config))
-    , m_realm(CoreRealm::get_shared_realm({ .path = this->config.path }))
     {
+        std::vector<realm::ObjectSchema> schema;
+
+        (schema.push_back(static_cast<realm::ObjectSchema>(Ts::schema())), ...);
+
+        m_realm = CoreRealm::get_shared_realm({
+            .path = this->config.path,
+            .schema = realm::Schema(schema),
+            .schema_version = 0
+        });
     }
     Realm(Config&& config)
     : config(std::move(config))
@@ -964,7 +1051,7 @@ struct Realm {
     }
 
     template <ObjectPersistable T>
-    void add(T& object)
+    void add(T& object) requires (std::is_same_v<T, Ts> || ...)
     {
         CppContext ctx;
         auto schema = T::schema();
@@ -975,9 +1062,14 @@ struct Realm {
         auto managed = table->create_object(ObjKey{}, values);
         schema.initialize(object, std::move(managed), m_realm);
     }
+    template <ObjectPersistable T>
+    void add(T&& object) requires (std::is_same_v<T, Ts> || ...)
+    {
+        add(object);
+    }
 
     template <ObjectPersistable T>
-    void remove(T& object)
+    void remove(T& object) requires (std::is_same_v<T, Ts> || ...)
     {
         CppContext ctx;
         auto schema = T::schema();
@@ -989,9 +1081,10 @@ struct Realm {
     }
 
     template <ObjectPersistable T>
-    Results<T> objects()
+    Results<T> objects() requires (std::is_same_v<T, Ts> || ...)
     {
-        return Results<T>(realm::Results(m_realm, m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema().name))));
+        return Results<T>(realm::Results(m_realm,
+                                         m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema().name))));
     }
 
     Config config;
@@ -999,10 +1092,118 @@ private:
     std::shared_ptr<CoreRealm> m_realm;
 };
 
+// MARK: - Observation
+
+template <ObjectPersistable T>
+using ObjectNotificationCallback = std::function<void(T&,
+                                                      std::vector<std::string> property_names,
+                                                      std::vector<std::any> old_values,
+                                                      std::vector<std::any> new_values,
+                                                      std::exception_ptr error)>;
+struct NotificationToken {
+
+private:
+    template <ObjectPersistable T>
+    friend NotificationToken observe(const T& obj, ObjectNotificationCallback<T> block);
+    realm::Object m_object;
+    SharedRealm m_realm;
+    realm::NotificationToken m_token;
+};
+
+namespace {
+template <ObjectPersistable T>
+struct ObjectChangeCallbackWrapper {
+    ObjectNotificationCallback<T> block;
+    T object;
+
+    std::optional<std::vector<std::string>> property_names = std::nullopt;
+    std::optional<std::vector<std::any>> old_values = std::nullopt;
+    bool deleted = false;
+
+    void populateProperties(realm::CollectionChangeSet const& c) {
+        if (property_names) {
+            return;
+        }
+        if (!c.deletions.empty()) {
+            deleted = true;
+            return;
+        }
+        if (c.columns.empty()) {
+            return;
+        }
+
+        // FIXME: It's possible for the column key of a persisted property
+        // to equal the column key of a computed property.
+        auto properties = std::vector<std::string>();
+        TableRef table = object.m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema().name));
+        std::apply([&properties, &table, &c](auto&& props) {
+            ((c.columns.count(table->get_column_key(props.name)) ?
+              properties.push_back(props.name) : 0), props);
+        }, T::schema().props);
+        if (!properties.empty()) {
+            property_names = properties;
+        }
+    }
+
+    std::optional<std::vector<std::any>> readValues(realm::CollectionChangeSet const& c) {
+        if (c.empty()) {
+            return std::nullopt;
+        }
+        populateProperties(c);
+        if (!property_names) {
+            return std::nullopt;
+        }
+
+        std::vector<std::any> values;
+        for (auto& name : *property_names) {
+            if (auto prop = T::schema().property_for_name(name.data())) {
+                auto unwrapped = *prop;
+                values.push_back(std::any(object.*unwrapped.ptr));
+            }
+        }
+        return values;
+    }
+
+    void before(realm::CollectionChangeSet const& c) {
+        old_values = readValues(c);
+    }
+
+    void after(realm::CollectionChangeSet const& c) {
+        auto new_values = readValues(c);
+        if (deleted) {
+            block(object, {}, {}, {}, nullptr);
+        } else if (new_values) {
+            block(object, property_names, old_values, new_values, nullptr);
+        }
+        property_names = std::nullopt;
+        old_values = std::nullopt;
+    }
+
+    void error(std::exception_ptr err) {
+        block(object, {}, {}, {}, err);
+    }
+};
+}
+template <ObjectPersistable T>
+NotificationToken observe(const T& obj, ObjectNotificationCallback<T> block)
+{
+    if (!obj.m_realm) {
+        throw std::runtime_error("Only objects which are managed by a Realm support change notifications");
+    }
+    NotificationToken token;
+    token.m_object = realm::Object(obj.m_realm, static_cast<realm::ObjectSchema>(T::schema()), *obj.m_obj);
+    token.m_realm = obj.m_realm;
+    token.m_token = token.m_object.add_notification_callback(ObjectChangeCallbackWrapper<T>{block, obj});
+    return token;
+}
+
 template <ObjectPersistable ...Ts, typename T>
 Realm<Ts...> User::realm(const T& partition_value) const requires (StringPersistable<T> || IntPersistable<T>)
 {
     SyncConfig sync_config(m_user, bson::Bson(partition_value));
+    sync_config.error_handler = [](std::shared_ptr<SyncSession> session, SyncError error) {
+        std::cout<<"sync error: "<<error.message<<std::endl;
+    };
     typename sdk::Realm<Ts...>::Config config;
     config.sync_config = std::make_shared<SyncConfig>(sync_config);
     config.path = m_user->sync_manager()->path_for_realm(sync_config);

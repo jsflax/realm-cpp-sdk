@@ -22,7 +22,7 @@ var cxxSettings: [CXXSetting] = [
     .define("REALM_VERSION_PATCH", to: "1"),
     .define("REALM_VERSION_EXTRA", to: "\"\""),
     .define("REALM_VERSION_STRING", to: "\"11.6.1\""),
-    .unsafeFlags(["-LDFLAGS=\"-L/usr/local/opt/curl/lib\""], nil)
+//    .unsafeFlags(["-LDFLAGS=\"-L/usr/local/opt/curl/lib\""], nil)
 ]
 
 #if swift(>=5.5)

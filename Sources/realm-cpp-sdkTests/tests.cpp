@@ -28,6 +28,21 @@ struct Person: realm::sdk::Object {
     }
 };
 
+struct AllTypes: realm::sdk::Object {
+    realm::sdk::Persisted<std::string> name;
+    realm::sdk::Persisted<int> age;
+    realm::sdk::Persisted<std::optional<Dog>> dog;
+
+    static constexpr auto schema() {
+        return realm::sdk::Model {
+            "AllTypes",
+            realm::sdk::property {"name", &AllTypes::name},
+            realm::sdk::property {"age", &AllTypes::age},
+            realm::sdk::property {"dog", &AllTypes::dog},
+        };
+    }
+};
+
 static auto success_count = 0;
 static auto fail_count = 0;
 template <typename T, typename V>
@@ -59,13 +74,21 @@ realm::sdk::task<void> run() {
     auto dog = **person.dog;
     assert_equals(*dog.name, "Fido");
 
+    realm::sdk::observe<Person>(person, [](Person& person,
+                                   std::vector<std::string> property_names,
+                                   std::vector<std::any> old_values,
+                                   std::vector<std::any> new_values,
+                                   std::exception_ptr error) {
+        for (auto& name : property_names)
+            std::cout<<name<<std::endl;
+    });
     realm.write([&person] {
         person.age = 21;
         person.age -= 2;
     });
 
     assert_equals(*person.age, 19);
-
+    assert(person.age <= 19);
     auto persons = realm.objects<Person>();
     assert_equals(persons.size(), 1);
 
@@ -82,7 +105,9 @@ realm::sdk::task<void> run() {
     auto user = co_await app.login(realm::sdk::App::Credentials::anonymous());
     assert(!user.access_token().empty());
     auto synced_realm = user.realm<Person, Dog>("foo");
-
+    synced_realm.write([&synced_realm]() {
+        synced_realm.add(Person{.name="Zoe"});
+    });
     co_return;
 }
 

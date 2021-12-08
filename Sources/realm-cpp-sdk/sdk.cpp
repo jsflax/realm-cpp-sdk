@@ -1,5 +1,4 @@
-#include "include/sdk.hpp"
+#include "sdk.hpp"
 
 namespace realm::sdk {
-
 }
