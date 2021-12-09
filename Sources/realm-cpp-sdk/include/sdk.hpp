@@ -11,19 +11,21 @@
 #include <realm/object-store/impl/object_accessor_impl.hpp>
 #include <realm/object-store/shared_realm.hpp>
 #include <realm/object-store/object.hpp>
+#include <realm/object-store/object_schema.hpp>
+#include <realm/object-store/schema.hpp>
 #include <realm/object-store/sync/app.hpp>
 #include <realm/object-store/sync/sync_user.hpp>
 #include <realm/object-store/sync/impl/sync_client.hpp>
+#include <realm/object-store/sync/async_open_task.hpp>
+#include <realm/object-store/thread_safe_reference.hpp>
 
-#include "jthread.hpp"
-
-#if QT_VERSION
+#ifdef QT_CORE_LIB
 #include <QStandardPaths>
 #endif
 
 namespace realm {
 class Obj;
-struct Realm;
+class Realm;
 
 using CoreRealm = Realm;
 
@@ -75,7 +77,7 @@ struct Object {
     template <typename T>
     friend NotificationToken observe(const T& cls);
     std::shared_ptr<Realm> m_realm = nullptr;
-    std::shared_ptr<Obj> m_obj = nullptr;
+    std::optional<Obj> m_obj;
 };
 
 template <class T>
@@ -95,7 +97,7 @@ concept Optional = is_optional<T>::value;
 
 template <typename T>
 concept ObjectPersistable = std::is_base_of_v<Object, T> && requires(T a) {
-    { T::schema() };
+    { std::is_same_v<typename T::schema::Class, T> };
 };
 template <ObjectPersistable T>
 struct persisted_type<T> { using type = realm::ObjKey; };
@@ -139,9 +141,11 @@ template<OptionalPersistable T> static constexpr PropertyType property_type() {
 template<DoublePersistable T> static constexpr PropertyType property_type() {
     return PropertyType::Double;
 }
+
 // MARK: Persisted
 template <Persistable T>
 struct Persisted {
+    using Result = T;
     using type = typename persisted_type<T>::type;
 
     Persisted() {
@@ -168,9 +172,6 @@ struct Persisted {
             if (!m_obj)
                 unmanaged.~string();
         }
-        if (m_obj) {
-            m_obj.reset();
-        }
     }
     Persisted(const Persisted& o) {
         *this = o;
@@ -181,15 +182,15 @@ struct Persisted {
     template <typename S>
     requires (StringPersistable<T>) && std::is_same_v<S, const char*>
     Persisted& operator=(S o) {
-        if (m_obj) {
-            m_obj->set<type>(managed, o);
+        if (auto obj = m_obj) {
+            obj->template set<type>(managed, o);
         } else {
             unmanaged = o;
         }
         return *this;
     }
     Persisted& operator=(const T& o) {
-        if (m_obj) {
+        if (auto obj = m_obj) {
             // if parent is managed...
             if constexpr (OptionalObjectPersistable<T>) {
                 // if object...
@@ -198,7 +199,7 @@ struct Persisted {
                     if (link->m_obj) {
                         // if object is managed, we will to set the link
                         // to the new target's key
-                        m_obj->set<type>(managed, link->m_obj->get_key());
+                        obj->template set<type>(managed, link->m_obj->get_key());
                     } else {
                         // else new unmanaged object is being assigned.
                         // we must assign the values to this object's fields
@@ -208,53 +209,43 @@ struct Persisted {
                     // else null link is being assigned to this field
                     // e.g., `person.dog = std::nullopt;`
                     // set the parent column to null and unset the co
-                    m_obj->set_null(managed);
+                    obj->set_null(managed);
                 }
             } else {
-                m_obj->set<type>(managed, o);
+                obj->template set<type>(managed, o);
             }
         } else {
-            unmanaged = o;
+            new (&unmanaged) T(o);
         }
         return *this;
     }
+
     Persisted& operator=(const Persisted& o) {
-        if (o.m_obj) {
-            m_obj = o.m_obj;
-            managed = o.managed;
+        if (auto obj = o.m_obj) {
+            m_obj = obj;
+            new (&managed) ColKey(o.managed);
         } else {
-            unmanaged = o.unmanaged;
+            new (&unmanaged) T(o.unmanaged);
         }
         return *this;
     }
     Persisted& operator=(Persisted&& o) {
         if (o.m_obj) {
-            m_obj = std::move(o.m_obj);
-            managed = std::move(o.managed);
+            m_obj = o.m_obj;
+            new (&managed) ColKey(std::move(o.managed));
         } else {
             new (&unmanaged) T(std::move(o.unmanaged));
         }
         return *this;
     }
-    T operator ->()
-    {
-        if (m_obj) {
-            if constexpr (OptionalObjectPersistable<T>) {
-                return T::value_type::schema().create(m_obj->get_linked_object(managed), nullptr);
-            } else {
-                return m_obj->get<type>(managed);
-            }
-        }
-        else { return unmanaged; }
-    }
-    T operator *()
+    T operator *() const
     {
         if (m_obj) {
             if constexpr (OptionalPersistable<T>) {
                 if constexpr (ObjectPersistable<typename T::value_type>) {
-                    return T::value_type::schema().create(m_obj->get_linked_object(managed), nullptr);
+                    return T::value_type::schema::create(m_obj->get_linked_object(managed), nullptr);
                 } else {
-                    auto value = m_obj->get<type>(managed);
+                    auto value = m_obj->template get<type>(managed);
                     // convert optionals
                     if (value) {
                         return T(*value);
@@ -263,7 +254,7 @@ struct Persisted {
                     }
                 }
             } else {
-                return m_obj->get<type>(managed);
+                return m_obj->template get<type>(managed);
             }
         } else {
             return unmanaged;
@@ -273,14 +264,15 @@ struct Persisted {
     type as_core_type() const
     {
         if constexpr (ObjectPersistable<T>) {
-            if (m_obj && (*m_obj) != Obj{}) { return m_obj->get<type>(managed); }
-            else {
+            if (m_obj) {
+                return m_obj->template get<type>(managed);
+            } else {
                 assert(false);
                 return ObjKey{}; /* should never happen */
             }
         } else {
-            if (m_obj && (*m_obj) != Obj{}) {
-                return m_obj->get<type>(managed);
+            if (m_obj) {
+                return m_obj->template get<type>(managed);
             } else {
                 return convert_if_required<T>(unmanaged);
             }
@@ -289,7 +281,7 @@ struct Persisted {
 
     void operator -=(const T& a) requires (IntPersistable<T> || DoublePersistable<T>) {
         if (m_obj) {
-            m_obj->set<type>(managed, *(*this) - a);
+            m_obj->template set<type>(managed, *(*this) - a);
         } else {
             unmanaged -= a;
         }
@@ -302,7 +294,7 @@ struct Persisted {
     }
     void operator +=(const T& a) requires (AddAssignable<T>) {
         if (m_obj) {
-            m_obj->set<type>(managed, *(*this) + a);
+            m_obj->template set<type>(managed, *(*this) + a);
         } else {
             unmanaged += a;
         }
@@ -329,11 +321,11 @@ struct Persisted {
         T unmanaged;
         realm::ColKey managed;
     };
-    std::shared_ptr<Obj> m_obj;
-};
-
-struct Property {
-    const char* name;
+    void assign(const Obj& object, const ColKey& col_key) {
+        m_obj = object;
+        new (&managed) ColKey(col_key);
+    }
+    std::optional<Obj> m_obj;
 };
 
 static constexpr bool streq(char const *a, std::string_view b) {
@@ -346,18 +338,32 @@ struct StringLiteral {
         std::copy_n(str, N, value);
     }
 
+    operator std::string() const { return value; }
     char value[N];
 };
 
-template<typename Class, typename Result>
+
+template <typename T>
+struct ptr_type_extractor_base;
+template <typename Result, typename Class>
+struct ptr_type_extractor_base<Result Class::*>
+{
+    using class_type = Class;
+    using member_type = Result;
+};
+
+template <auto T>
+struct ptr_type_extractor : ptr_type_extractor_base<decltype(T)> {
+};
+
+using IsPrimaryKey = bool;
+template <StringLiteral Name, auto Ptr, IsPrimaryKey IsPrimaryKey = false>
 struct property {
-    constexpr property(const char* name,
-                       Persisted<Result> Class::*ptr,
-                       bool is_primary_key = false)
-    : ptr(ptr)
-    , name(name)
-    , type(property_type<Result>())
-    , is_primary_key(is_primary_key)
+    using Result = typename ptr_type_extractor<Ptr>::member_type::Result;
+    using Class = typename ptr_type_extractor<Ptr>::class_type;
+
+    constexpr property()
+    : type(property_type<Result>())
     {
     }
 
@@ -368,7 +374,7 @@ struct property {
     explicit operator realm::Property() const {
         if constexpr (OptionalPersistable<Result>) {
             if constexpr (ObjectPersistable<typename Result::value_type>) {
-                return realm::Property(name, type, Result::value_type::schema().name);
+                return realm::Property(name, type, Result::value_type::schema::name);
             } else {
                 return realm::Property(name, type);
             }
@@ -377,136 +383,120 @@ struct property {
         }
     }
 
-    void assign(Class& object, ColKey col_key, SharedRealm realm) {
-        (object.*ptr).m_obj = object.m_obj;
-        (object.*ptr).managed = col_key;
+    static void assign(Class& object, ColKey col_key, SharedRealm realm) {
+        (object.*Ptr).assign(*object.m_obj, col_key);
     }
 
     constexpr bool operator ==(std::string_view name) {
         return streq(this->name, name);
     }
-    const char * name;
-    Persisted<Result> Class::*ptr;
+    static constexpr const char* name = Name.value;
+    static constexpr Persisted<Result> Class::*ptr = Ptr;
     PropertyType type;
-    bool is_primary_key;
+    static constexpr bool is_primary_key = IsPrimaryKey;
 };
 
-struct ObjectSchema;
-
-template<typename Class, typename ...Result>
-struct Model {
-    static constexpr const char* extract_name(auto&& p) { return p.name; }
-    static constexpr auto name_tuple(property<Class, Result>&... properties) {
-        return std::make_tuple(extract_name(properties)...);
-    }
-    constexpr Model(const char* name, property<Class, Result>&& ...properties)
-    : name(name)
-    , n(sizeof...(Result))
-    , props{std::move(properties)...}
-    {
-
-    }
-
-
-    const std::size_t n;
-    std::tuple<property<Class, Result>...> props;
-    const char * name;
-
-    template <size_t N = 0>
-    static constexpr auto property_for_name(std::tuple<property<Class, Result>...> props, std::string_view name)
-    {
-        if constexpr(N >= sizeof...(Result)) {
-            return;
+// MARK: Schema
+template <OptionalObjectPersistable T>
+static void push_back_field(std::vector<FieldValue>& values, TableRef& table, ColKey key, Persisted<T>& field,
+                            auto property, auto& cls)
+{
+    if (*field) {
+        if (field.m_obj) {
+            values.push_back({key, field.as_core_type()});
         } else {
-            auto names = std::apply([](auto&&... props){
-                return name_tuple(props...);
-            }, props);
-    //         auto o = std::get<N>(props).name;
-            if (std::get<N>(props) == name) {
-                return &std::get<N>(props);
+            auto target_table = table->get_link_target(key);
+            auto target_cls = *field;
+
+            Obj obj;
+            if constexpr (T::value_type::schema::HasPrimaryKeyProperty) {
+                obj = target_table->create_object_with_primary_key((**field).*T::value_type::schema::PrimaryKeyProperty::ptr, T::value_type::schema::to_persisted_values(*target_cls, target_table));
             } else {
-                return property_for_name<N + 1>(props, name);
+                obj = target_table->create_object(ObjKey{}, T::value_type::schema::to_persisted_values(*target_cls, target_table));
+            }
+
+            property.assign(cls, key, nullptr);
+            values.push_back({key, obj.get_key()});
+        }
+    }
+}
+
+template <PrimitivePersistable T>
+static void push_back_field(std::vector<FieldValue>& values, TableRef&, ColKey key, Persisted<T>& field, auto, auto&)
+{
+    values.push_back({key, field.as_core_type()});
+}
+
+template <typename T>
+concept Propertyable = requires(T a) {
+    { std::is_same_v<std::string, decltype(a.name)> };
+    { std::is_same_v<typename T::Result T::Class::*, decltype(a.ptr)> };
+    { std::is_same_v<PropertyType, decltype(a.type)> };
+};
+
+template <StringLiteral Name, Propertyable ...Properties>
+struct schema {
+    using Class = typename std::tuple_element_t<0, std::tuple<Properties...>>::Class;
+    static constexpr const char* name = Name.value;
+    static constexpr const std::tuple<Properties...> properties{};
+
+    template <size_t N, Propertyable P>
+    static constexpr auto primary_key(P&)
+    {
+        if constexpr (P::is_primary_key) {
+            return P();
+        } else {
+            if constexpr (N + 1 == sizeof...(Properties)) {
+                return;
+            } else {
+                return primary_key<N + 1>(std::get<N + 1>(properties));
             }
         }
     }
-
-    constexpr auto property_for_name(const char* name)
-    {
-        return property_for_name(props, name);
+    static constexpr auto primary_key() {
+        return primary_key<0>(std::get<0>(properties));
     }
-    explicit operator realm::ObjectSchema() const
+
+
+    using PrimaryKeyProperty = decltype(primary_key());
+    static constexpr bool HasPrimaryKeyProperty = !std::is_void_v<PrimaryKeyProperty>;
+
+    static std::vector<FieldValue> to_persisted_values(Class& cls, TableRef& table) {
+        std::vector<FieldValue> values;
+        (push_back_field(values, table, table->get_column_key(Properties::name), cls.*Properties::ptr, Properties(), cls), ...);
+        return values;
+    }
+
+    static realm::ObjectSchema to_core_schema()
     {
         realm::ObjectSchema schema;
-        schema.name = name;
-        std::apply([&schema](auto&&... props){
-            (schema.persisted_properties.push_back(static_cast<realm::Property>(props)) , ...);
-        }, props);
+        schema.name = Name;
+        (schema.persisted_properties.push_back(static_cast<realm::Property>(Properties())) , ...);
+        if constexpr (HasPrimaryKeyProperty) {
+            schema.primary_key = PrimaryKeyProperty::name;
+        }
         return schema;
     }
 
-    void initialize(Class& cls, Obj&& obj, SharedRealm realm)
+    static void initialize(Class& cls, Obj&& obj, SharedRealm realm)
     {
-        cls.m_obj = std::make_shared<Obj>(std::move(obj));
+        cls.m_obj = std::move(obj);
         cls.m_realm = realm;
-        std::apply([&cls, &realm](auto&&... props) {
-            (props.assign(cls, cls.m_obj->get_table()->get_column_key(props.name), realm), ...);
-        }, props);
+        (Properties::assign(cls, cls.m_obj->get_table()->get_column_key(Properties::name), realm), ...);
     }
 
-    Class create(Obj&& obj, SharedRealm realm)
+    static Class create(Obj&& obj, SharedRealm realm)
     {
         Class cls;
         initialize(cls, std::move(obj), realm);
         return cls;
     }
-
-    template <OptionalObjectPersistable T>
-    static void push_back_field(std::vector<FieldValue>& values, TableRef& table, ColKey key, Persisted<T>& field,
-                                property<Class, T> property, Class& cls)
+    static Class* create_new(Obj&& obj, SharedRealm realm)
     {
-        if (*field) {
-            if (field.m_obj) {
-                values.push_back({key, field.as_core_type()});
-            } else {
-                auto target_table = table->get_link_target(key);
-                auto model = T::value_type::schema();
-                auto target_cls = *field;
-                auto obj = target_table->create_object(ObjKey{}, model.to_persisted_values(*target_cls, target_table));
-                property.assign(cls, key, nullptr);
-                values.push_back({key, obj.get_key()});
-            }
-            values.push_back({key, field.as_core_type()});
-        }
+        auto cls = new Class();
+        initialize(*cls, std::move(obj), realm);
+        return cls;
     }
-
-    template <PrimitivePersistable T>
-    static void push_back_field(std::vector<FieldValue>& values, TableRef&, ColKey key, Persisted<T>& field, property<Class, T>, Class&)
-    {
-        values.push_back({key, field.as_core_type()});
-    }
-
-    std::vector<FieldValue> to_persisted_values(Class& cls, TableRef& table) {
-        std::vector<FieldValue> values;
-        std::apply([&cls, &values, &table](auto&&... props) {
-            (push_back_field(values, table, table->get_column_key(props.name), cls.*props.ptr, props, cls), ...);
-        }, props);
-        return values;
-    }
-};
-
-struct ObjectSchema {
-    template<typename Class, typename ...Result>
-    constexpr ObjectSchema(Model<Class, Result...>&& model)
-    : m_schema(static_cast<realm::ObjectSchema>(model))
-    {
-    }
-
-    explicit operator realm::ObjectSchema() const
-    {
-        return m_schema;
-    }
-private:
-    realm::ObjectSchema m_schema;
 };
 
 // MARK: Results
@@ -533,14 +523,14 @@ struct Results {
         reference operator*() noexcept
         {
             auto obj = m_parent->m_parent.template get<Obj>(m_idx);
-            value = std::move(T::schema().create(std::move(obj), m_parent->m_parent.get_realm()));
+            value = std::move(T::schema::create(std::move(obj), m_parent->m_parent.get_realm()));
             return value;
         }
 
         pointer operator->() const noexcept
         {
             auto obj = m_parent->m_parent.template get<Obj>(m_idx);
-            this->value = T::schema().create(std::move(obj), m_parent->m_parent.get_realm());
+            this->value = T::schema::create(std::move(obj), m_parent->m_parent.get_realm());
             return &value;
         }
 
@@ -747,10 +737,10 @@ struct task_promise_base {
     auto final_suspend() noexcept {
         struct awaiter {
             bool await_ready() noexcept {
-                return false;
+                return !next || next.done();
             }
-            void await_suspend(std::experimental::coroutine_handle<> handle) noexcept {
-                if (next && !next.done()) {
+            void await_suspend(std::experimental::coroutine_handle<>) noexcept {
+                if (next) {
                     next();
                 }
             }
@@ -860,19 +850,14 @@ inline void handle_result_args() {}
 template <typename T>
 inline T&& handle_result_args(T&& res) { return FWD(res); }
 
-//template <typename T>
-//T&& handle_result_args(std::error_code ec, T&& res) {
-//    if (ec) throw std::system_error(ec);
-//    return FWD(res);
-//}
-//template <typename T>
-//T&& handle_result_args(T&& res, std::error_code ec) {
-//    if (ec) throw std::system_error(ec);
-//    return FWD(res);
-//}
 template <typename T>
 inline T&& handle_result_args(T&& res, util::Optional<app::AppError> ec) {
     if (ec) throw std::system_error(ec->error_code);
+    return FWD(res);
+}
+template <typename T>
+inline T&& handle_result_args(T&& res, std::exception_ptr ec) {
+    if (ec) throw ec;
     return FWD(res);
 }
 template <typename Res, typename F>
@@ -893,7 +878,7 @@ auto make_awaitable(F&& func) {
         }
         Res await_resume() {
             if (result)
-                return *result;
+                return std::move(*result);
             std::rethrow_exception(*error);
         }
         std::optional<Res> result;
@@ -902,8 +887,6 @@ auto make_awaitable(F&& func) {
     };
     return Awaiter{.func = func};
 }
-
-#define MAKE_AWAITABLE(type, expr) make_awaitable<type>([&] (auto cb) {(expr);})
 
 template <ObjectPersistable ...Ts>
 struct Realm;
@@ -920,7 +903,7 @@ struct User {
         return m_user->refresh_token();
     }
     template <ObjectPersistable ...Ts, typename T>
-    Realm<Ts...> realm(const T& partition_value) const requires (StringPersistable<T> || IntPersistable<T>);
+    task<Realm<Ts...>> realm(const T& partition_value) const requires (StringPersistable<T> || IntPersistable<T>);
     std::shared_ptr<SyncUser> m_user;
 };
 
@@ -946,8 +929,12 @@ public:
         #else
         config.metadata_mode = SyncManager::MetadataMode::Encryption;
         #endif
-        #if QT_VERSION
-        config.base_file_path = QStandardPaths::AppDataLocation;
+        #ifdef QT_CORE_LIB
+        auto qt_path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
+        if (!std::filesystem::exists(qt_path)) {
+            std::filesystem::create_directory(qt_path);
+        }
+        config.base_file_path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
         #else
         config.base_file_path = std::filesystem::current_path();
         #endif
@@ -994,53 +981,59 @@ struct Realm {
 
     struct Config {
         std::string path = std::filesystem::current_path().append("default.realm");
-        std::vector<ObjectSchema> schema;
+
     private:
         friend struct User;
+        template <ObjectPersistable ...>
+        friend struct Realm;
         std::shared_ptr<SyncConfig> sync_config;
     };
 
-    Realm()
-    {
-        std::vector<realm::ObjectSchema> schema;
-
-        (schema.push_back(static_cast<realm::ObjectSchema>(Ts::schema())), ...);
-
-        m_realm = CoreRealm::get_shared_realm({
-            .path = this->config.path,
-            .schema = realm::Schema(schema),
-            .schema_version = 0
-        });
-    }
-
-    Realm(const Config& config)
+    Realm(const Config& config = {})
     : config(std::move(config))
     {
         std::vector<realm::ObjectSchema> schema;
 
-        (schema.push_back(static_cast<realm::ObjectSchema>(Ts::schema())), ...);
+        (schema.push_back(Ts::schema::to_core_schema()), ...);
 
         m_realm = CoreRealm::get_shared_realm({
             .path = this->config.path,
             .schema = realm::Schema(schema),
-            .schema_version = 0
+            .schema_version = 0,
+            .sync_config = this->config.sync_config
         });
     }
     Realm(Config&& config)
     : config(std::move(config))
-
     {
         std::vector<realm::ObjectSchema> schema;
-        for (auto& s : this->config.schema)
-        {
-            schema.push_back(static_cast<realm::ObjectSchema>(s));
-        }
+        (schema.push_back(Ts::schema::to_core_schema()), ...);
 
         m_realm = CoreRealm::get_shared_realm({
             .path = this->config.path,
             .schema = realm::Schema(schema),
-            .schema_version = 0
+            .schema_version = 0,
+            .sync_config = this->config.sync_config
         });
+    }
+
+    static task<Realm> open(Config&& config) {
+        std::vector<realm::ObjectSchema> schema;
+        (schema.push_back(Ts::schema::to_core_schema()), ...);
+
+        std::shared_ptr<AsyncOpenTask> async_open_task = CoreRealm::get_synchronized_realm({
+            .path = config.path,
+            .schema = realm::Schema(schema),
+            .schema_version = 0,
+            .sync_config = config.sync_config
+        });
+        auto tsr = co_await make_awaitable<ThreadSafeReference>([&async_open_task](auto cb) {
+            async_open_task->start(cb);
+        });
+        auto ref = tsr.template resolve<std::shared_ptr<CoreRealm>>(nullptr);
+        auto realm = Realm(std::move(config));
+        ref.reset();
+        co_return realm;
     }
 
     void write(std::function<void()>&& block) const
@@ -1054,13 +1047,18 @@ struct Realm {
     void add(T& object) requires (std::is_same_v<T, Ts> || ...)
     {
         CppContext ctx;
-        auto schema = T::schema();
-        auto actual_schema = *m_realm->schema().find(schema.name);
+        auto actual_schema = *m_realm->schema().find(T::schema::name);
         auto& group = m_realm->read_group();
         auto table = group.get_table(actual_schema.table_key);
-        auto values = schema.to_persisted_values(object, table);
-        auto managed = table->create_object(ObjKey{}, values);
-        schema.initialize(object, std::move(managed), m_realm);
+        auto values = T::schema::to_persisted_values(object, table);
+        Obj managed;
+        if constexpr (T::schema::HasPrimaryKeyProperty) {
+            auto pk = *(object.*T::schema::PrimaryKeyProperty::ptr);
+            managed = table->create_object_with_primary_key(pk, std::move(values));
+        } else {
+            managed = table->create_object(ObjKey{}, values);
+        }
+        T::schema::initialize(object, std::move(managed), m_realm);
     }
     template <ObjectPersistable T>
     void add(T&& object) requires (std::is_same_v<T, Ts> || ...)
@@ -1072,8 +1070,7 @@ struct Realm {
     void remove(T& object) requires (std::is_same_v<T, Ts> || ...)
     {
         CppContext ctx;
-        auto schema = T::schema();
-        auto actual_schema = *m_realm->schema().find(schema.name);
+        auto actual_schema = *m_realm->schema().find(T::schema::name);
         std::vector<FieldValue> dict;
         auto& group = m_realm->read_group();
         auto table = group.get_table(actual_schema.table_key);
@@ -1084,7 +1081,21 @@ struct Realm {
     Results<T> objects() requires (std::is_same_v<T, Ts> || ...)
     {
         return Results<T>(realm::Results(m_realm,
-                                         m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema().name))));
+                                         m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema::name))));
+    }
+
+    template <ObjectPersistable T>
+    T object(const typename T::schema::PrimaryKeyProperty::Result& primary_key) {
+        auto table = m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema::name));
+        return T::schema::create(table->get_object_with_primary_key(primary_key),
+                                 m_realm);
+    }
+
+    template <ObjectPersistable T>
+    T* object_new(const typename T::schema::PrimaryKeyProperty::Result& primary_key) {
+        auto table = m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema::name));
+        return T::schema::create_new(table->get_object_with_primary_key(primary_key),
+                                 m_realm);
     }
 
     Config config;
@@ -1095,7 +1106,7 @@ private:
 // MARK: - Observation
 
 template <ObjectPersistable T>
-using ObjectNotificationCallback = std::function<void(T&,
+using ObjectNotificationCallback = std::function<void(const T&,
                                                       std::vector<std::string> property_names,
                                                       std::vector<std::any> old_values,
                                                       std::vector<std::any> new_values,
@@ -1114,7 +1125,7 @@ namespace {
 template <ObjectPersistable T>
 struct ObjectChangeCallbackWrapper {
     ObjectNotificationCallback<T> block;
-    T object;
+    const T* object;
 
     std::optional<std::vector<std::string>> property_names = std::nullopt;
     std::optional<std::vector<std::any>> old_values = std::nullopt;
@@ -1135,11 +1146,12 @@ struct ObjectChangeCallbackWrapper {
         // FIXME: It's possible for the column key of a persisted property
         // to equal the column key of a computed property.
         auto properties = std::vector<std::string>();
-        TableRef table = object.m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema().name));
-        std::apply([&properties, &table, &c](auto&& props) {
-            ((c.columns.count(table->get_column_key(props.name)) ?
-              properties.push_back(props.name) : 0), props);
-        }, T::schema().props);
+        TableRef table = object->m_realm->read_group().get_table(ObjectStore::table_name_for_object_type(T::schema::name));
+
+        std::apply([&c, &table, &properties](auto&&... props) {
+            (((c.columns.count(table->get_column_key(props.name).value)) ?
+              properties.push_back(props.name) : void()), ...);
+        }, T::schema::properties);
         if (!properties.empty()) {
             property_names = properties;
         }
@@ -1156,10 +1168,9 @@ struct ObjectChangeCallbackWrapper {
 
         std::vector<std::any> values;
         for (auto& name : *property_names) {
-            if (auto prop = T::schema().property_for_name(name.data())) {
-                auto unwrapped = *prop;
-                values.push_back(std::any(object.*unwrapped.ptr));
-            }
+            std::apply([&name, &values, this](auto&&... props) {
+                ((name == props.name ? values.push_back(*(object->*props.ptr)) : void()), ...);
+            }, T::schema::properties);
         }
         return values;
     }
@@ -1171,16 +1182,16 @@ struct ObjectChangeCallbackWrapper {
     void after(realm::CollectionChangeSet const& c) {
         auto new_values = readValues(c);
         if (deleted) {
-            block(object, {}, {}, {}, nullptr);
+            block(*object, {}, {}, {}, nullptr);
         } else if (new_values) {
-            block(object, property_names, old_values, new_values, nullptr);
+            block(*object, *property_names, old_values ? *old_values : std::vector<std::any>{}, *new_values, nullptr);
         }
         property_names = std::nullopt;
         old_values = std::nullopt;
     }
 
     void error(std::exception_ptr err) {
-        block(object, {}, {}, {}, err);
+        block(*object, {}, {}, {}, err);
     }
 };
 }
@@ -1191,14 +1202,14 @@ NotificationToken observe(const T& obj, ObjectNotificationCallback<T> block)
         throw std::runtime_error("Only objects which are managed by a Realm support change notifications");
     }
     NotificationToken token;
-    token.m_object = realm::Object(obj.m_realm, static_cast<realm::ObjectSchema>(T::schema()), *obj.m_obj);
+    token.m_object = realm::Object(obj.m_realm, T::schema::to_core_schema(), *(obj.m_obj));
     token.m_realm = obj.m_realm;
-    token.m_token = token.m_object.add_notification_callback(ObjectChangeCallbackWrapper<T>{block, obj});
+    token.m_token = token.m_object.add_notification_callback(ObjectChangeCallbackWrapper<T>{block, &obj});
     return token;
 }
 
 template <ObjectPersistable ...Ts, typename T>
-Realm<Ts...> User::realm(const T& partition_value) const requires (StringPersistable<T> || IntPersistable<T>)
+task<Realm<Ts...>> User::realm(const T& partition_value) const requires (StringPersistable<T> || IntPersistable<T>)
 {
     SyncConfig sync_config(m_user, bson::Bson(partition_value));
     sync_config.error_handler = [](std::shared_ptr<SyncSession> session, SyncError error) {
@@ -1207,7 +1218,8 @@ Realm<Ts...> User::realm(const T& partition_value) const requires (StringPersist
     typename sdk::Realm<Ts...>::Config config;
     config.sync_config = std::make_shared<SyncConfig>(sync_config);
     config.path = m_user->sync_manager()->path_for_realm(sync_config);
-    return sdk::Realm<Ts...>(config);
+    auto realm = co_await sdk::Realm<Ts...>::open(std::move(config));
+    co_return realm;
 }
 
 } // namespace sdk

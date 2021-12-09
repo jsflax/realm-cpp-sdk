@@ -4,13 +4,9 @@ struct Dog: realm::sdk::Object {
     realm::sdk::Persisted<std::string> name;
     realm::sdk::Persisted<int> age;
 
-    static constexpr auto schema() {
-        return realm::sdk::Model {
-            "Dog",
-            realm::sdk::property {"name", &Dog::name},
-            realm::sdk::property {"age", &Dog::age}
-        };
-    }
+    using schema = realm::sdk::schema<"Dog",
+                                      realm::sdk::property<"name", &Dog::name>,
+                                      realm::sdk::property<"age", &Dog::age>>;
 };
 
 struct Person: realm::sdk::Object {
@@ -18,29 +14,18 @@ struct Person: realm::sdk::Object {
     realm::sdk::Persisted<int> age;
     realm::sdk::Persisted<std::optional<Dog>> dog;
 
-    static constexpr auto schema() {
-        return realm::sdk::Model {
-            "Person",
-            realm::sdk::property {"name", &Person::name},
-            realm::sdk::property {"age", &Person::age},
-            realm::sdk::property {"dog", &Person::dog},
-        };
-    }
+    using schema = realm::sdk::schema<"Person",
+                                      realm::sdk::property<"name", &Person::name>,
+                                      realm::sdk::property<"age", &Person::age>,
+                                      realm::sdk::property<"dog", &Person::dog>>;
 };
 
-struct AllTypes: realm::sdk::Object {
-    realm::sdk::Persisted<std::string> name;
-    realm::sdk::Persisted<int> age;
-    realm::sdk::Persisted<std::optional<Dog>> dog;
+struct AllTypesObject: realm::sdk::Object {
+    realm::sdk::Persisted<int> id;
 
-    static constexpr auto schema() {
-        return realm::sdk::Model {
-            "AllTypes",
-            realm::sdk::property {"name", &AllTypes::name},
-            realm::sdk::property {"age", &AllTypes::age},
-            realm::sdk::property {"dog", &AllTypes::dog},
-        };
-    }
+    using schema = realm::sdk::schema<
+        "AllTypesObject",
+        realm::sdk::property<"id", &AllTypesObject::id, true>>;
 };
 
 static auto success_count = 0;
@@ -58,7 +43,7 @@ std::cout<<__FILE__<<"L"<<__LINE__<<":"<<#a<<" did not equal "<<#b<<std::endl;\
 }
 
 realm::sdk::task<void> run() {
-    auto realm = realm::sdk::Realm<Person, Dog>();
+    auto realm = realm::sdk::Realm<Person, Dog, AllTypesObject>();
 
     auto person = Person();
     person.name = "John";
@@ -74,14 +59,18 @@ realm::sdk::task<void> run() {
     auto dog = **person.dog;
     assert_equals(*dog.name, "Fido");
 
-    realm::sdk::observe<Person>(person, [](Person& person,
-                                   std::vector<std::string> property_names,
-                                   std::vector<std::any> old_values,
-                                   std::vector<std::any> new_values,
-                                   std::exception_ptr error) {
-        for (auto& name : property_names)
-            std::cout<<name<<std::endl;
+    auto token = realm::sdk::observe<Person>(person, [](const Person& person,
+                                                        std::vector<std::string> property_names,
+                                                        std::vector<std::any> old_values,
+                                                        std::vector<std::any> new_values,
+                                                        std::exception_ptr error) {
+        assert_equals(std::count(property_names.begin(), property_names.end(), "age"), 1);
+        assert_equals(property_names.size(), 1);
+
+        assert_equals(new_values.size(), 1);
+        assert_equals(std::any_cast<int>(new_values[0]), 19);
     });
+
     realm.write([&person] {
         person.age = 21;
         person.age -= 2;
@@ -91,6 +80,10 @@ realm::sdk::task<void> run() {
     assert(person.age <= 19);
     auto persons = realm.objects<Person>();
     assert_equals(persons.size(), 1);
+
+    realm.write([&realm]{
+        realm.add(AllTypesObject{.id = 1});
+    });
 
     std::vector<Person> people;
     std::copy(persons.begin(), persons.end(), std::back_inserter(people));
@@ -104,10 +97,12 @@ realm::sdk::task<void> run() {
     auto app = realm::sdk::App("todo-cqenc");
     auto user = co_await app.login(realm::sdk::App::Credentials::anonymous());
     assert(!user.access_token().empty());
-    auto synced_realm = user.realm<Person, Dog>("foo");
+    auto synced_realm = co_await user.realm<Person, Dog>("foo");
     synced_realm.write([&synced_realm]() {
         synced_realm.add(Person{.name="Zoe"});
     });
+
+    assert_equals(*realm.object<AllTypesObject>(1).id, 1);
     co_return;
 }
 
@@ -115,6 +110,8 @@ int main() {
     auto task = run();
     auto coro = task.p->coro();
     coro.resume();
+    task.await_ready();
+
     std::cout<<success_count<<"/"<<success_count + fail_count<<" checks completed successfully."<<std::endl;
     return 0;
 }
