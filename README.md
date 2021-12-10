@@ -15,7 +15,7 @@ Realm was built for mobile developers, with simplicity in mind. The idiomatic, o
 
 ```swift
 // Define your models like regular Swift classes
-class Dog: realm::object {
+struct Dog: realm::object {
     realm::persisted<std::string> name;
     realm::persisted<int> age;
     
@@ -24,7 +24,7 @@ class Dog: realm::object {
                                  realm::property<"age", &Dog::age>>;
 };
 
-class Person: realm::object {
+struct Person: realm::object {
     realm::peristed<std::string> var _id;
     realm::persisted<std::string> name;
     realm::persisted<int> age;
