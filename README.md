@@ -13,7 +13,7 @@ This repository holds the source code for the C++ SDK Prototype.
 
 Realm was built for mobile developers, with simplicity in mind. The idiomatic, object-oriented data model can save you thousands of lines of code.
 
-```cpp
+```swift
 // Define your models like regular Swift classes
 class Dog: realm::object {
     realm::persisted<std::string> name;
@@ -26,7 +26,7 @@ class Dog: realm::object {
 
 class Person: realm::object {
     realm::peristed<std::string> var _id;
-        realm::persisted<std::string> name;
+    realm::persisted<std::string> name;
     realm::persisted<int> age;
     // Create relationships by pointing an Object field to another Class
     realm::persisted<std::optional<Dog>> dog;
@@ -50,7 +50,7 @@ realm.write([&realm, &dog] {
 ```
 ## Live Objects: Build Reactive Apps
 Realm’s live objects mean data updated anywhere is automatically updated everywhere.
-```cpp
+```swift
 // Open the default realm.
 auto realm = realm::open<Person, Dog>();
 
