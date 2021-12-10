@@ -5,11 +5,9 @@ import PackageDescription
 
 var cxxSettings: [CXXSetting] = [
     .headerSearchPath("."),
-    .headerSearchPath("include"),
-    .define("REALM_SPM", to: "1"),
-    .define("REALM_PLATFORM_APPLE", to: "1"),
+    .headerSearchPath("../"),
     .define("REALM_ENABLE_SYNC", to: "1"),
-    .define("REALM_VERSION", to: "11.6.1"),
+    .define("REALM_VERSION", to: "0.0.1"),
 
     .define("REALM_DEBUG", .when(configuration: .debug)),
     .define("REALM_NO_CONFIG"),
@@ -17,27 +15,18 @@ var cxxSettings: [CXXSetting] = [
     .define("REALM_ENABLE_ASSERTIONS", to: "1"),
     .define("REALM_ENABLE_ENCRYPTION", to: "1"),
 
-    .define("REALM_VERSION_MAJOR", to: "11"),
-    .define("REALM_VERSION_MINOR", to: "6"),
+    .define("REALM_VERSION_MAJOR", to: "0"),
+    .define("REALM_VERSION_MINOR", to: "0"),
     .define("REALM_VERSION_PATCH", to: "1"),
     .define("REALM_VERSION_EXTRA", to: "\"\""),
-    .define("REALM_VERSION_STRING", to: "\"11.6.1\""),
-//    .unsafeFlags(["-LDFLAGS=\"-L/usr/local/opt/curl/lib\""], nil)
+    .define("REALM_VERSION_STRING", to: "\"0.0.1\"")
 ]
-
-#if swift(>=5.5)
-cxxSettings.append(.define("REALM_HAVE_SECURE_TRANSPORT", to: "1", .when(platforms: [.macOS, .macCatalyst, .iOS, .tvOS, .watchOS])))
-#else
-cxxSettings.append(.define("REALM_HAVE_SECURE_TRANSPORT", to: "1", .when(platforms: [.macOS, .iOS, .tvOS, .watchOS])))
-#endif
 
 let testCxxSettings: [CXXSetting] = cxxSettings + [
     // Command-line `swift build` resolves header search paths
     // relative to the package root, while Xcode resolves them
     // relative to the target root, so we need both.
-    .headerSearchPath("Realm"),
-    .headerSearchPath("../"),
-    .headerSearchPath("../../Sources/realm-cpp-sdk"),
+    .headerSearchPath("../src")
 ]
 
 let package = Package(
@@ -49,7 +38,6 @@ let package = Package(
         .watchOS(.v2)
     ],
     products: [
-        // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(
             name: "realm-cpp-sdk",
             targets: ["realm-cpp-sdk"]),
@@ -67,12 +55,11 @@ let package = Package(
                 .brew(["curl"])
             ]
         ),
-        // Targets are the basic building blocks of a package. A target can define a module or a test suite.
-        // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
             name: "realm-cpp-sdk",
             dependencies: [.product(name: "RealmCore", package: "realm-core"), "libcurl"],
-            publicHeadersPath: "include",
+            path: "src/cpprealm",
+            publicHeadersPath: ".",
             cxxSettings: cxxSettings,
             linkerSettings: [
                 .linkedFramework("Foundation", .when(platforms: [.macOS, .iOS, .tvOS, .watchOS])),
@@ -81,8 +68,8 @@ let package = Package(
         .executableTarget(
             name: "realm-cpp-sdkTests",
             dependencies: ["realm-cpp-sdk", "libcurl"],
-            cxxSettings: cxxSettings + [
-                .headerSearchPath("../../Sources/realm-cpp-sdk/include"),
+            path: "tests",
+            cxxSettings: testCxxSettings + [
                 .define("REALM_DISABLE_METADATA_ENCRYPTION")
             ]),
     ],
