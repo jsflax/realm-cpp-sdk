@@ -14,7 +14,7 @@ This repository holds the source code for the C++ SDK Prototype.
 Realm was built for mobile developers, with simplicity in mind. The idiomatic, object-oriented data model can save you thousands of lines of code.
 
 ```swift
-// Define your models like regular Swift classes
+// Define your models like regular structs.
 struct Dog: realm::object {
     realm::persisted<std::string> name;
     realm::persisted<int> age;
