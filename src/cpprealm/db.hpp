@@ -102,10 +102,10 @@ struct db {
 
         m_realm = Realm::get_shared_realm({
             .path = this->config.path,
+	    .schema_mode = SchemaMode::AdditiveExplicit,
             .schema = Schema(schema),
             .schema_version = 0,
-            .sync_config = this->config.sync_config,
-            .schema_mode = SchemaMode::AdditiveExplicit,
+            .sync_config = this->config.sync_confg,
             .scheduler = this->config.scheduler()
         });
     }
@@ -118,10 +118,10 @@ struct db {
 
         m_realm = Realm::get_shared_realm({
             .path = this->config.path,
+	    .schema_mode = SchemaMode::AdditiveExplicit,
             .schema = Schema(schema),
             .schema_version = 0,
             .sync_config = this->config.sync_config,
-            .schema_mode = SchemaMode::AdditiveExplicit,
             .scheduler = this->config.scheduler()
         });
     }
@@ -251,10 +251,10 @@ static task<thread_safe_reference<db<Ts...>>> async_open(typename db<Ts...>::Con
 
     std::shared_ptr<AsyncOpenTask> async_open_task = Realm::get_synchronized_realm({
         .path = config.path,
+	.schema_mode = SchemaMode::AdditiveExplicit,
         .schema = Schema(schema),
         .schema_version = 0,
-        .sync_config = config.sync_config,
-        .schema_mode = SchemaMode::AdditiveExplicit
+        .sync_config = config.sync_config
     });
     co_return thread_safe_reference<db<Ts...>>(co_await make_awaitable<ThreadSafeReference>([&async_open_task](auto cb) {
         async_open_task->start(cb);

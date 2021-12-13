@@ -50,8 +50,6 @@
 
 #include <QtWidgets>
 
-#include <QtNetwork>
-
 #include "controller.h"
 
 realm::task<void> get_car(Controller& controller)

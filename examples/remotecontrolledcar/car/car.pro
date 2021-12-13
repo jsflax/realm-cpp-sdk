@@ -1,23 +1,27 @@
-QT += widgets network
+QT += widgets
 
-DBUS_ADAPTORS += car.xml
+QMAKE_CXX=g++-10
+CONFIG+=c++2a
+QMAKE_CXXFLAGS+="-std=c++2a -fcoroutines -fconcepts"
+
 HEADERS += car.h
 SOURCES += car.cpp main.cpp
-INCLUDEPATH += /usr/local/include/
-CONFIG+=c++2a
+INCLUDEPATH += /usr/local/include/ /usr/include/
+
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.15
+CONFIG += system-zlib copy-dt-needed-entries lz
 # install
-target.path = $$[QT_INSTALL_EXAMPLES]/dbus/remotecontrolledcar/car
+target.path = $$PWD
 INSTALLS += target
 LIBS += -L/usr/local/lib \
-    -lz \
-    -lcurl \
     -lcpprealm \
-    -lrealm-dbg \
     -lrealm-object-store-dbg \
     -lrealm-sync-dbg \
+    -lrealm-dbg \
     -lrealm-parser-dbg \
-    -framework Foundation -framework Security
+    -lz -lcurl
+unix: LIBS += -lssl -lcrypto
+macos: LIBS += -framework Foundation -framework Security
 DEFINES += REALM_ENABLE_SYNC
 
 RESOURCES += \

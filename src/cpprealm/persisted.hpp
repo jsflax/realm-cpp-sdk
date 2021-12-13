@@ -244,7 +244,7 @@ typename persisted<T>::type persisted<T>::as_core_type() const
         if (m_obj) {
             return m_obj->template get<type>(managed);
         } else {
-            assert(false);
+            REALM_ASSERT(false);
             return ObjKey{}; /* should never happen */
         }
     } else {

@@ -18,11 +18,6 @@ struct Realm;
 struct NotificationToken;
 struct object;
 
-namespace {
-template <type_info::ObjectPersistable T>
-struct ObjectChangeCallbackWrapper;
-}
-
 // MARK: NotificationToken
 /**
  A token which is returned from methods which subscribe to changes to a `realm::object`.
@@ -89,6 +84,10 @@ struct ObjectChange {
     PropertyChange property;
 };
 
+namespace {
+template <type_info::ObjectPersistable T>
+struct ObjectChangeCallbackWrapper;
+}
 // MARK: Object
 /**
  `realm::object` is a class used to define Realm model objects.
@@ -224,8 +223,12 @@ using ObjectNotificationCallback = std::function<void(const T*,
                                                       std::vector<std::any> new_values,
                                                       std::exception_ptr error)>;
 
-template <type_info::ObjectPersistable T>
-struct ObjectChangeCallbackWrapper {
+
+}
+
+template <typename T>
+notification_token object::observe(std::function<void(ObjectChange<T>)> block) {
+  struct ObjectChangeCallbackWrapper {
     ObjectNotificationCallback<T> block;
     const T& object;
 
@@ -295,17 +298,13 @@ struct ObjectChangeCallbackWrapper {
     void error(std::exception_ptr err) {
         block(nullptr, {}, {}, {}, err);
     }
-};
-}
-
-template <typename T>
-notification_token object::observe(std::function<void(ObjectChange<T>)> block) {
+  };
     if (!m_realm) {
         throw std::runtime_error("Only objects which are managed by a Realm support change notifications");
     }
     notification_token token;
     token.m_object = realm::Object(m_realm, T::schema::to_core_schema(), *(m_obj));
-    token.m_token = token.m_object.add_notification_callback(ObjectChangeCallbackWrapper<T>{
+    token.m_token = token.m_object.add_notification_callback(ObjectChangeCallbackWrapper{
         [block](const T* ptr,
                 std::vector<std::string> property_names,
                 std::vector<std::any> old_values,

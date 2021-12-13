@@ -3,9 +3,10 @@ cmake_minimum_required(VERSION 3.15)
 project(realm)
 
 # Project-wide build flags
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+#set(CMAKE_CXX_STANDARD 20)
+#set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#set(CMAKE_CXX_EXTENSIONS OFF)
+#set(CMAKE_CXX20_STANDARD_COMPILE_OPTION "-std=c++2a")
 
 add_subdirectory(realm-core)
 
@@ -16,7 +17,7 @@ set(REALM_ENABLE_SYNC)
 
 add_compile_definitions(REALM_NO_CONFIG)
 add_compile_definitions(REALM_ENABLE_SYNC)
-
+add_compile_definitions(REALM_BUILD_LIB_ONLY)
 add_compile_definitions(REALM_VERSION_MAJOR=0)
 add_compile_definitions(REALM_VERSION_MINOR=0)
 add_compile_definitions(REALM_VERSION_PATCH=1)
@@ -43,13 +44,32 @@ add_library(cpprealm STATIC ${SOURCES} ${HEADERS})
 
 target_include_directories(cpprealm PRIVATE realm-core/src)
 target_include_directories(cpprealm PUBLIC /usr/local/include)
+target_include_directories(cpprealm PUBLIC /usr/include/c++/10)
+target_include_directories(cpprealm PUBLIC src)
+
 target_sources(cpprealm PRIVATE ${SOURCES})
-target_link_libraries(cpprealm RealmCore ObjectStore ${CURL_LIBRARIES})
+set_property(TARGET cpprealm PROPERTY CXX_STANDARD 20)
+target_compile_options(cpprealm PUBLIC -std=c++2a)
+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 10 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
+target_compile_options(cpprealm PUBLIC -fcoroutines)
+endif()
+
+#find_package(ZLIB REQUIRED)
+#include_directories(${ZLIB_INCLUDE_DIRS})
+
+#target_link_libraries(cpprealm RealmCore ObjectStore ${CURL_LIBRARIES} ${ZLIB_LIBRARIES})
+
+target_link_libraries(cpprealm RealmCore ObjectStore z curl)
 set_target_properties(cpprealm PROPERTIES PUBLIC_HEADER "${HEADERS}")
 
-set(CURL_LIBRARY "-lcurl")
-find_package(CURL REQUIRED)
-include_directories(${CURL_INCLUDE_DIR})
+#set(CURL_LIBRARY "-lcurl")
+#set(ZLIB_LIBRARY "-lz")
+
+#find_package(CURL REQUIRED)
+#include_directories(${CURL_INCLUDE_DIR})
+#include_directories(${ZLIB_INCLUDE_DIR})
+
 install(TARGETS cpprealm
         PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cpprealm
 )

@@ -49,7 +49,7 @@
 ****************************************************************************/
 
 #include "car.h"
-#include "car_adaptor.h"
+
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QGraphicsView>
 #include <QtWidgets/QGraphicsScene>

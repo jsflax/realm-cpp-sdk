@@ -57,9 +57,6 @@ struct property {
         (object.*Ptr).assign(*object.m_obj, col_key);
     }
 
-    constexpr bool operator ==(std::string_view name) {
-        return streq(this->name, name);
-    }
     static constexpr const char* name = Name.value;
     static constexpr persisted<Result> Class::*ptr = Ptr;
     PropertyType type;

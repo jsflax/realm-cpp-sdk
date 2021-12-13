@@ -51,7 +51,6 @@
 #include <QtWidgets>
 
 #include "controller.h"
-#include "car_interface.h"
 #include <iostream>
 
 Controller::Controller(QWidget *parent)
