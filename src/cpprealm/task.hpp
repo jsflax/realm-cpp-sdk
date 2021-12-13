@@ -4,17 +4,15 @@
 // since C++ 20
 #include <version>
 
-#ifdef __cpp_lib_coroutine
+#ifdef cpp_lib_coroutine
 #include <coroutine>
 using namespace std;
-#elif __cpp_lib_experimental_coroutine
-    #include <experimental/coroutine>
+#elif __has_include(<experimental/coroutine>)
+#include <experimental/coroutine>
 using namespace std::experimental;
 #else
 #error "no coroutine support"
 #endif
-
-#include <coroutine>
 
 namespace realm {
 
