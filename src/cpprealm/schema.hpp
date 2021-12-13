@@ -48,6 +48,12 @@ struct property {
             } else {
                 return realm::Property(name, type);
             }
+        } else if constexpr (type_info::ListPersistable<Result>) {
+            if constexpr (type_info::ObjectPersistable<typename Result::value_type>) {
+                return realm::Property(name, type, Result::value_type::schema::name);
+            } else {
+                return realm::Property(name, type, is_primary_key);
+            }
         } else {
             return realm::Property(name, type, is_primary_key);
         }
@@ -57,6 +63,42 @@ struct property {
         (object.*Ptr).assign(*object.m_obj, col_key);
     }
 
+    static void set(Class& object, ColKey col_key) {
+        object.m_obj->template set<typename type_info::persisted_type<Result>::type>(col_key,
+                                                                                     (object.*ptr).as_core_type());
+    }
+    static void set(Class& object, ColKey col_key) requires (type_info::ListPersistable<Result>) {
+        if constexpr (type_info::ObjectPersistable<typename Result::value_type>) {
+            for (auto& list_obj : (object.*ptr).unmanaged) {
+                auto table = object.m_obj->get_table()->get_link_target(col_key);
+                Result::value_type::schema::add(list_obj, table, object.m_realm);
+                object.m_obj->get_linklist(col_key).add(list_obj.m_obj->get_key());
+            }
+        } else {
+            object.m_obj->set_list_values(col_key, (object.*ptr).as_core_type());
+        }
+    }
+    static void set(Class& object, ColKey col_key) requires (type_info::OptionalObjectPersistable<Result>) {
+        auto field = (object.*ptr);
+        if (*field) {
+            if (field.m_obj) {
+                object.m_obj->set(col_key, field.m_obj->get_key());
+            } else {
+                auto target_table = object.m_obj->get_table()->get_link_target(col_key);
+                auto target_cls = *field;
+
+                Obj obj;
+                if constexpr (Result::value_type::schema::HasPrimaryKeyProperty) {
+                    obj = target_table->create_object_with_primary_key((**field).*Result::value_type::schema::PrimaryKeyProperty::ptr);
+                } else {
+                    obj = target_table->create_object();
+                }
+                target_cls->m_obj = obj;
+                Result::value_type::schema::set(*target_cls);
+                object.m_obj->set(col_key, obj.get_key());
+            }
+        }
+    }
     static constexpr const char* name = Name.value;
     static constexpr persisted<Result> Class::*ptr = Ptr;
     PropertyType type;
@@ -87,15 +129,8 @@ struct schema {
         return primary_key<0>(std::get<0>(properties));
     }
 
-
     using PrimaryKeyProperty = decltype(primary_key());
     static constexpr bool HasPrimaryKeyProperty = !std::is_void_v<PrimaryKeyProperty>;
-
-    static std::vector<FieldValue> to_persisted_values(Class& cls, TableRef& table) {
-        std::vector<FieldValue> values;
-        (push_back_field(values, table, table->get_column_key(Properties::name), cls.*Properties::ptr, Properties(), cls), ...);
-        return values;
-    }
 
     static realm::ObjectSchema to_core_schema()
     {
@@ -108,10 +143,16 @@ struct schema {
         return schema;
     }
 
+    static void set(Class& cls)
+    {
+        (Properties::set(cls, cls.m_obj->get_table()->get_column_key(Properties::name)), ...);
+    }
+
     static void initialize(Class& cls, Obj&& obj, SharedRealm realm)
     {
         cls.m_obj = std::move(obj);
         cls.m_realm = realm;
+
         (Properties::assign(cls, cls.m_obj->get_table()->get_column_key(Properties::name), realm), ...);
     }
 
@@ -133,37 +174,19 @@ struct schema {
         initialize(*cls, std::move(obj), realm);
         return cls;
     }
-private:
-    template <type_info::OptionalObjectPersistable T>
-    static void push_back_field(std::vector<FieldValue>& values,
-                                TableRef& table, ColKey key, persisted<T>& field,
-                                auto property, auto& cls)
+
+    static void add(Class& object, TableRef table, SharedRealm realm)
     {
-        if (*field) {
-            if (field.m_obj) {
-                values.push_back({key, field.as_core_type()});
-            } else {
-                auto target_table = table->get_link_target(key);
-                auto target_cls = *field;
-
-                Obj obj;
-                if constexpr (T::value_type::schema::HasPrimaryKeyProperty) {
-                    obj = target_table->create_object_with_primary_key((**field).*T::value_type::schema::PrimaryKeyProperty::ptr, T::value_type::schema::to_persisted_values(*target_cls, target_table));
-                } else {
-                    obj = target_table->create_object(ObjKey{}, T::value_type::schema::to_persisted_values(*target_cls, target_table));
-                }
-
-                property.assign(cls, key, nullptr);
-                values.push_back({key, obj.get_key()});
-            }
+        Obj managed;
+        if constexpr (HasPrimaryKeyProperty) {
+            auto pk = *(object.*PrimaryKeyProperty::ptr);
+            managed = table->create_object_with_primary_key(pk);
+        } else {
+            managed = table->create_object(ObjKey{});
         }
-    }
-
-    template <type_info::PrimitivePersistable T>
-    static void push_back_field(std::vector<FieldValue>& values,
-                                TableRef&, ColKey key, persisted<T>& field, auto, auto&)
-    {
-        values.push_back({key, field.as_core_type()});
+        object.m_obj = managed;
+        set(object);
+        initialize(object, std::move(managed), realm);
     }
 };
 

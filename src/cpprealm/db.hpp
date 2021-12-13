@@ -95,7 +95,6 @@ struct db {
 
     db(const Config& config = {}) : config(config)
     {
-        std::cout<<"realm: db::open "<<this<<std::endl;
         std::vector<ObjectSchema> schema;
 
         (schema.push_back(Ts::schema::to_core_schema()), ...);
@@ -112,7 +111,6 @@ struct db {
     db(Config&& config)
     : config(std::move(config))
     {
-        std::cout<<"realm: db::open "<<this<<std::endl;
         std::vector<ObjectSchema> schema;
         (schema.push_back(Ts::schema::to_core_schema()), ...);
 
@@ -139,16 +137,9 @@ struct db {
         auto actual_schema = *m_realm->schema().find(T::schema::name);
         auto& group = m_realm->read_group();
         auto table = group.get_table(actual_schema.table_key);
-        auto values = T::schema::to_persisted_values(object, table);
-        Obj managed;
-        if constexpr (T::schema::HasPrimaryKeyProperty) {
-            auto pk = *(object.*T::schema::PrimaryKeyProperty::ptr);
-            managed = table->create_object_with_primary_key(pk, std::move(values));
-        } else {
-            managed = table->create_object(ObjKey{}, values);
-        }
-        T::schema::initialize(object, std::move(managed), m_realm);
+        T::schema::add(object, table, m_realm);
     }
+
     template <type_info::ObjectPersistable T>
     void add(T&& object) requires (std::is_same_v<T, Ts> || ...)
     {

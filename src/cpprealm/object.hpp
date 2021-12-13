@@ -195,8 +195,10 @@ struct object {
 
 private:
     template <type_info::Persistable T>
-    friend struct persisted;
+    friend struct persisted_base;
     template <type_info::OptionalObjectPersistable T>
+    friend constexpr typename type_info::persisted_type<T>::type type_info::convert_if_required(const T& a);
+    template <type_info::ListPersistable T>
     friend constexpr typename type_info::persisted_type<T>::type type_info::convert_if_required(const T& a);
     template <StringLiteral, auto Ptr, bool IsPrimaryKey>
     friend struct property;
@@ -208,6 +210,8 @@ private:
     friend struct db;
     template <typename T>
     friend struct thread_safe_reference;
+    template <realm::type_info::ListPersistable T>
+    friend struct persisted_container_base;
 
     std::shared_ptr<Realm> m_realm = nullptr;
     std::optional<Obj> m_obj;

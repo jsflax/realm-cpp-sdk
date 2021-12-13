@@ -20,17 +20,27 @@ struct Person: realm::object {
                                  realm::property<"dog", &Person::dog>>;
 };
 
+struct AllTypesObjectLink: realm::object {
+    realm::persisted<std::string> str_col;
+
+    using schema = realm::schema<"AllTypesObjectLink", realm::property<"str_col", &AllTypesObjectLink::str_col>>;
+};
+
 struct AllTypesObject: realm::object {
-    enum Enum {
+    enum class Enum {
         one, two
     };
 
     realm::persisted<int> _id;
     realm::persisted<Enum> enum_col;
+    realm::persisted<std::vector<int>> list_int_col;
+    realm::persisted<std::vector<AllTypesObjectLink>> list_obj_col;
 
     using schema = realm::schema<
         "AllTypesObject",
-        realm::property<"_id", &AllTypesObject::_id, true>>;;
+        realm::property<"_id", &AllTypesObject::_id, true>,
+        realm::property<"list_int_col", &AllTypesObject::list_int_col>,
+        realm::property<"list_obj_col", &AllTypesObject::list_obj_col>>;
 };
 
 static auto success_count = 0;
@@ -91,7 +101,7 @@ realm::task<void> testAll() {
     auto app = realm::App("car-wsney");
     auto user = co_await app.login(realm::App::Credentials::anonymous());
 
-    auto tsr = co_await user.realm<AllTypesObject>("foo");
+    auto tsr = co_await user.realm<AllTypesObject, Dog>("foo");
     auto synced_realm = tsr.resolve();
     synced_realm.write([&synced_realm]() {
         synced_realm.add(AllTypesObject{._id=1});
@@ -99,6 +109,32 @@ realm::task<void> testAll() {
 
     assert_equals(*synced_realm.object<AllTypesObject>(1)._id, 1);
 
+    co_return;
+}
+
+// MARK: Test List
+realm::task<void> testList() {
+    auto realm = realm::open<AllTypesObject, Dog>();
+    auto obj = AllTypesObject{};
+    obj.list_int_col.push_back(42);
+    assert_equals(obj.list_int_col[0], 42);
+
+    obj.list_obj_col.push_back(AllTypesObjectLink{.str_col="Fido"});
+    assert_equals(obj.list_obj_col[0].str_col, "Fido");
+    realm.write([&realm, &obj]() {
+        realm.add(obj);
+    });
+    assert_equals(obj.list_int_col[0], 42);
+    assert_equals(obj.list_obj_col[0].str_col, "Fido");
+
+    realm.write([&obj]() {
+        obj.list_int_col.push_back(84);
+        obj.list_obj_col.push_back(AllTypesObjectLink{.str_col="Rex"});
+    });
+    assert_equals(obj.list_int_col[0], 42);
+    assert_equals(obj.list_int_col[1], 84);
+    assert_equals(obj.list_obj_col[0].str_col, "Fido");
+    assert_equals(obj.list_obj_col[1].str_col, "Rex");
     co_return;
 }
 
@@ -135,7 +171,11 @@ struct Foo: realm::object {
 
 int main() {
     try {
-        auto tasks = { testAll(), testThreadSafeReference() };
+        auto tasks = {
+            testAll(),
+            testThreadSafeReference(),
+            testList()
+        };
         {
             while (std::transform_reduce(tasks.begin(), tasks.end(), true,
                                          [](bool done1, bool done2) -> bool { return done1 && done2; },
