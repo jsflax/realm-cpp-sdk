@@ -21,7 +21,7 @@ struct FieldValue;
 ///     realm::persisted<int> basic_int_property;
 ///
 ///     // Custom default values can be specified with the
-///     // standard Swift syntax
+///     // standard c++ syntax
 ///     realm::persisted<int> int_with_custom_default = 5;
 ///
 ///     // Primary key properties can be picked in schema.
