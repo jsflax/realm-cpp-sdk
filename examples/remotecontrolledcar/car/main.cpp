@@ -66,11 +66,12 @@ realm::task<void> add_car(Car* car)
 
     // invoke on the main thread
     QMetaObject::invokeMethod(qApp, [tsr = std::move(tsr), car]() mutable {
-        std::cout<<"car: in schedule block"<<std::endl;
         auto realm = tsr.resolve();
-        realm.add(*car);
+        realm.write([&realm, car] {
+            realm.add(*car);
+        });
+
         token = car->observe<Car>([car](auto&&) {
-            std::cout<<"car: in observe block"<<std::endl;
             car->on_change();
         });
     });

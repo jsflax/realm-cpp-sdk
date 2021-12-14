@@ -1,15 +1,15 @@
 QT += widgets
 
-QMAKE_CXX=g++-10
 CONFIG+=c++2a
-QMAKE_CXXFLAGS+="-std=c++2a -fcoroutines -fconcepts"
+QMAKE_CXXFLAGS+="-std=c++2a"
+linux-g++*: QMAKE_CXXFLAGS += "-fcoroutines -fconcepts"
 
 HEADERS += car.h
 SOURCES += car.cpp main.cpp
 INCLUDEPATH += /usr/local/include/ /usr/include/
 
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.15
-CONFIG += system-zlib copy-dt-needed-entries lz
+CONFIG += system-zlib
 # install
 target.path = $$PWD
 INSTALLS += target
@@ -20,7 +20,7 @@ LIBS += -L/usr/local/lib \
     -lrealm-dbg \
     -lrealm-parser-dbg \
     -lz -lcurl
-unix: LIBS += -lssl -lcrypto
+linux-g++*: LIBS += -lssl -lcrypto
 macos: LIBS += -framework Foundation -framework Security
 DEFINES += REALM_ENABLE_SYNC
 
