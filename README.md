@@ -38,7 +38,7 @@ public:
                                  realm::property<"name", &Person::name>,
                                  realm::property<"age", &Person::age>,
                                  realm::property<"dog", &Person::dog>>;
-}
+};
 // Use them like regular objects.
 auto dog = Dog { .name = "Rex", .age = 1 };
 std::cout<<"name of dog: "<<dog.name<<std::endl;
@@ -116,7 +116,7 @@ Prerequisites:
 * git, cmake, cxx20
 
 ```sh
-git submodule --init --recursive
+git submodule update --init --recursive
 mkdir build.debug
 cd build.debug
 cmake -D CMAKE_BUILD_TYPE=debug ..
