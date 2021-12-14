@@ -33,6 +33,7 @@
 #include <realm/object-store/shared_realm.hpp>
 #include <realm/object-store/sync/async_open_task.hpp>
 #include <realm/object-store/util/scheduler.hpp>
+#include <utility>
 
 #ifdef QT_CORE_LIB
 #include <QStandardPaths>
@@ -87,31 +88,27 @@ static std::shared_ptr<realm::util::Scheduler> make_qt()
 }
 #endif
 
+struct db_config {
+    db_config() = default;
+    db_config(std::string path) : path(std::move(path)) {}
+
+    std::string path = std::filesystem::current_path().append("default.realm");
+
+    std::shared_ptr<SyncConfig> sync_config;
+private:
+    friend struct User;
+    template <type_info::ObjectPersistable ...Ts>
+    friend struct db;
+#if QT_CORE_LIB
+    std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::make_qt;
+#else
+    std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::Scheduler::make_default;
+#endif
+};
 
 template <type_info::ObjectPersistable ...Ts>
 struct db {
-
-    struct Config {
-        Config() = default;
-        Config(const Config&) = default;
-        Config(Config&&) = default;
-        Config& operator=(const Config&) = default;
-        Config& operator=(Config&&) = default;
-
-        std::string path = std::filesystem::current_path().append("default.realm");
-
-        std::shared_ptr<SyncConfig> sync_config;
-    private:
-        friend struct User;
-        friend struct db<Ts...>;
-#if QT_CORE_LIB
-        std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::make_qt;
-#else
-        std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::Scheduler::make_default;
-#endif
-    };
-
-    db(const Config& config = {}) : config(config)
+    db(db_config config = {}) : config(std::move(config))
     {
         std::vector<ObjectSchema> schema;
 
@@ -119,22 +116,7 @@ struct db {
 
         m_realm = Realm::get_shared_realm({
             .path = this->config.path,
-	    .schema_mode = SchemaMode::AdditiveExplicit,
-            .schema = Schema(schema),
-            .schema_version = 0,
-            .sync_config = this->config.sync_config,
-            .scheduler = this->config.scheduler()
-        });
-    }
-    db(Config&& config)
-    : config(std::move(config))
-    {
-        std::vector<ObjectSchema> schema;
-        (schema.push_back(Ts::schema::to_core_schema()), ...);
-
-        m_realm = Realm::get_shared_realm({
-            .path = this->config.path,
-	    .schema_mode = SchemaMode::AdditiveExplicit,
+	        .schema_mode = SchemaMode::AdditiveExplicit,
             .schema = Schema(schema),
             .schema_version = 0,
             .sync_config = this->config.sync_config,
@@ -214,7 +196,7 @@ struct db {
         static_cast<util::QtMainLoopScheduler&>(*m_realm->scheduler()).schedule(std::move(fn));
     }
 #endif
-    Config config;
+    db_config config;
 private:
     db(SharedRealm realm)
     : m_realm(realm)
@@ -223,24 +205,15 @@ private:
         config.sync_config = realm->config().sync_config;
     }
     friend class object;
-    friend task<thread_safe_reference<db<Ts...>>> async_open(typename db<Ts...>::Config&& config);
+    template <typename ...Vs>
+    friend task<thread_safe_reference<db<Vs...>>> async_open(db_config config);
     template <typename T>
     friend struct thread_safe_reference;
     SharedRealm m_realm;
 };
 
 template <type_info::ObjectPersistable ...Ts>
-static db<Ts...> open(const typename db<Ts...>::Config& config = {})
-{
-    // TODO: Add these flags to core
-#if QT_CORE_LIB
-    util::Scheduler::set_default_factory(util::make_qt);
-#endif
-    return db<Ts...>(config);
-}
-
-template <type_info::ObjectPersistable ...Ts>
-static db<Ts...> open(typename db<Ts...>::Config&& config)
+static db<Ts...> open(db_config config = {})
 {
     // TODO: Add these flags to core
 #if QT_CORE_LIB
@@ -250,7 +223,7 @@ static db<Ts...> open(typename db<Ts...>::Config&& config)
 }
 
 template <type_info::ObjectPersistable ...Ts>
-static task<thread_safe_reference<db<Ts...>>> async_open(typename db<Ts...>::Config&& config) {
+static task<thread_safe_reference<db<Ts...>>> async_open(db_config config) {
     // TODO: Add these flags to core
 #if QT_CORE_LIB
     util::Scheduler::set_default_factory(util::make_qt);
@@ -260,7 +233,7 @@ static task<thread_safe_reference<db<Ts...>>> async_open(typename db<Ts...>::Con
 
     std::shared_ptr<AsyncOpenTask> async_open_task = Realm::get_synchronized_realm({
         .path = config.path,
-	.schema_mode = SchemaMode::AdditiveExplicit,
+	    .schema_mode = SchemaMode::AdditiveExplicit,
         .schema = Schema(schema),
         .schema_version = 0,
         .sync_config = config.sync_config

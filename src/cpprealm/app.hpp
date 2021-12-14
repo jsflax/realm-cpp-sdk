@@ -306,7 +306,7 @@ private:
 template <type_info::ObjectPersistable ...Ts, typename T>
 task<thread_safe_reference<db<Ts...>>> User::realm(const T& partition_value) const requires (type_info::StringPersistable<T> || type_info::IntPersistable<T>)
 {
-    typename db<Ts...>::Config config;
+    db_config config;
     config.sync_config = std::make_shared<SyncConfig>(m_user, bson::Bson(partition_value));
     config.sync_config->error_handler = [](std::shared_ptr<SyncSession> session, SyncError error) {
         std::cerr<<"sync error: "<<error.message<<std::endl;

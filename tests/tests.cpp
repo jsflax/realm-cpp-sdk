@@ -21,9 +21,10 @@ struct Person: realm::object {
 };
 
 struct AllTypesObjectLink: realm::object {
+    realm::persisted<int> _id;
     realm::persisted<std::string> str_col;
 
-    using schema = realm::schema<"AllTypesObjectLink", realm::property<"str_col", &AllTypesObjectLink::str_col>>;
+    using schema = realm::schema<"AllTypesObjectLink", realm::property<"_id", &AllTypesObjectLink::_id, true>, realm::property<"str_col", &AllTypesObjectLink::str_col>>;
 };
 
 struct AllTypesObject: realm::object {
@@ -58,7 +59,7 @@ if (!assert_equals(a, b)) {\
 std::cout<<__FILE__<<"L"<<__LINE__<<":"<<#a<<" did not equal "<<#b<<std::endl;\
 }
 
-realm::task<void> testAll() {
+realm::task<void> test_all() {
     auto realm = realm::open<Person, Dog>();
 
     auto person = Person();
@@ -101,7 +102,7 @@ realm::task<void> testAll() {
     auto app = realm::App("car-wsney");
     auto user = co_await app.login(realm::App::Credentials::anonymous());
 
-    auto tsr = co_await user.realm<AllTypesObject, Dog>("foo");
+    auto tsr = co_await user.realm<AllTypesObject, AllTypesObjectLink>("foo");
     auto synced_realm = tsr.resolve();
     synced_realm.write([&synced_realm]() {
         synced_realm.add(AllTypesObject{._id=1});
@@ -114,7 +115,7 @@ realm::task<void> testAll() {
 
 // MARK: Test List
 realm::task<void> testList() {
-    auto realm = realm::open<AllTypesObject, Dog>();
+    auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>();
     auto obj = AllTypesObject{};
     obj.list_int_col.push_back(42);
     assert_equals(obj.list_int_col[0], 42);
@@ -162,6 +163,22 @@ realm::task<void> testThreadSafeReference() {
     co_return;
 }
 
+realm::task<void> test_query()
+{
+    auto realm = realm::open<Person, Dog>();
+
+    auto person = Person { .name = "John", .age = 42 };
+    realm.write([&realm, &person](){
+        realm.add(person);
+    });
+
+    auto results = realm.objects<Person>().where("age > $0", {42});
+    assert_equals(results.size(), 0);
+    results = realm.objects<Person>().where("age = %@", {42});
+    assert_equals(results.size(), 1);
+    co_return;
+}
+
 struct Foo: realm::object {
     realm::persisted<int> bar;
     Foo() = default;
@@ -170,11 +187,12 @@ struct Foo: realm::object {
 };
 
 int main() {
-    try {
+
         auto tasks = {
-            testAll(),
+            test_all(),
             testThreadSafeReference(),
-            testList()
+            testList(),
+            test_query()
         };
         {
             while (std::transform_reduce(tasks.begin(), tasks.end(), true,
@@ -182,9 +200,10 @@ int main() {
                                          [](const realm::task<void>& task) -> bool { return task.handle.done(); }) == false) {
             };
         }
-    } catch (const std::exception &e) {
-        std::cout<<e.what()<<std::endl;;
-    }
+
+    std::filesystem::remove(realm::db_config{}.path);
+    std::filesystem::remove(realm::db_config{}.path + ".lock");
+    std::filesystem::remove(realm::db_config{}.path + ".note");
     std::cout<<success_count<<"/"<<success_count + fail_count<<" checks completed successfully."<<std::endl;
     return 0;
 }

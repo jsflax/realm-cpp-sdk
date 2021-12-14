@@ -97,6 +97,12 @@ struct results {
     {
         return m_parent.size();
     }
+
+    results& where(const std::string& query, const std::vector<Mixed> arguments)
+    {
+        m_parent = realm::Results(m_parent.get_realm(), m_parent.get_table()->query(query, arguments));
+        return *this;
+    }
 private:
     template <type_info::ObjectPersistable...>
     friend struct db;

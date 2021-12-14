@@ -11,12 +11,17 @@ project(realm)
 add_subdirectory(realm-core)
 
 set(REALM_INCLUDE_CERTS 0)
-set(REALM_BUILD_LIB_ONLY)
 set(REALM_NO_CONFIG)
 set(REALM_ENABLE_SYNC)
+set(REALM_NO_TESTS)
+set(REALM_BUILD_LIB_ONLY)
+set(REALM_INSTALL_LIBEXECDIR)
+set(REALM_ENABLE_ENCRYPTION 1)
 
 add_compile_definitions(REALM_NO_CONFIG)
 add_compile_definitions(REALM_ENABLE_SYNC)
+add_compile_definitions(REALM_ENABLE_ENCRYPTION)
+add_compile_definitions(REALM_INSTALL_LIBEXECDIR)
 add_compile_definitions(REALM_BUILD_LIB_ONLY)
 add_compile_definitions(REALM_VERSION_MAJOR=0)
 add_compile_definitions(REALM_VERSION_MINOR=0)
@@ -41,35 +46,31 @@ set(HEADERS
 ) # REALM_INSTALL_HEADERS
 
 add_library(cpprealm STATIC ${SOURCES} ${HEADERS})
+add_executable(cpprealm_exe_tests tests/tests.cpp)
+#add_test(cpprealm_tests)
 
 target_include_directories(cpprealm PRIVATE realm-core/src)
 target_include_directories(cpprealm PUBLIC /usr/local/include)
 target_include_directories(cpprealm PUBLIC /usr/include/c++/10)
 target_include_directories(cpprealm PUBLIC src)
+target_include_directories(cpprealm_exe_tests PUBLIC src)
+target_include_directories(cpprealm_exe_tests PUBLIC realm-core/src)
 
 target_sources(cpprealm PRIVATE ${SOURCES})
 set_property(TARGET cpprealm PROPERTY CXX_STANDARD 20)
+set_property(TARGET Storage PROPERTY REALM_BUILD_LIB_ONLY 1)
 target_compile_options(cpprealm PUBLIC -std=c++2a)
 
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 10 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
 target_compile_options(cpprealm PUBLIC -fcoroutines)
 endif()
 
-#find_package(ZLIB REQUIRED)
-#include_directories(${ZLIB_INCLUDE_DIRS})
+target_link_libraries(cpprealm Storage ObjectStore Sync z curl)
 
-#target_link_libraries(cpprealm RealmCore ObjectStore ${CURL_LIBRARIES} ${ZLIB_LIBRARIES})
-
-target_link_libraries(cpprealm RealmCore ObjectStore z curl)
 set_target_properties(cpprealm PROPERTIES PUBLIC_HEADER "${HEADERS}")
 
-#set(CURL_LIBRARY "-lcurl")
-#set(ZLIB_LIBRARY "-lz")
-
-#find_package(CURL REQUIRED)
-#include_directories(${CURL_INCLUDE_DIR})
-#include_directories(${ZLIB_INCLUDE_DIR})
-
 install(TARGETS cpprealm
-        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cpprealm
-)
+        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cpprealm)
+target_link_libraries(cpprealm_exe_tests PUBLIC cpprealm z curl ObjectStore Sync Storage)
+add_test(cpprealm_tests cpprealm_exe_tests)
+enable_testing()
