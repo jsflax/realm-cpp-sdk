@@ -57,7 +57,11 @@ let package = Package(
         ),
         .target(
             name: "realm-cpp-sdk",
-            dependencies: [.product(name: "RealmCore", package: "realm-core"), "libcurl"],
+            dependencies: [
+                .product(name: "RealmCore", package: "realm-core"),
+                .product(name: "RealmQueryParser", package: "realm-core"),
+                "libcurl"
+            ],
             path: "src/cpprealm",
             publicHeadersPath: ".",
             cxxSettings: cxxSettings,
