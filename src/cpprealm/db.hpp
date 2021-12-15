@@ -89,8 +89,8 @@ static std::shared_ptr<realm::util::Scheduler> make_qt()
 #endif
 
 struct db_config {
-    db_config() = default;
-    db_config(std::string path) : path(std::move(path)) {}
+//    db_config() = default;
+//    db_config(std::string path) : path(std::move(path)) {}
 
     std::string path = std::filesystem::current_path().append("default.realm");
 
@@ -99,12 +99,13 @@ private:
     friend struct User;
     template <type_info::ObjectPersistable ...Ts>
     friend struct db;
-#if QT_CORE_LIB
-    std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::make_qt;
-#else
-    std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::Scheduler::make_default;
-#endif
 };
+
+#if QT_CORE_LIB
+static std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::make_qt;
+#else
+static std::function<std::shared_ptr<util::Scheduler>()> scheduler = &util::Scheduler::make_default;
+#endif
 
 template <type_info::ObjectPersistable ...Ts>
 struct db {
@@ -120,7 +121,7 @@ struct db {
             .schema = Schema(schema),
             .schema_version = 0,
             .sync_config = this->config.sync_config,
-            .scheduler = this->config.scheduler()
+            .scheduler = scheduler()
         });
     }
 

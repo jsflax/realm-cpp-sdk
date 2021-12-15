@@ -24,6 +24,8 @@
 namespace realm {
 
 struct FieldValue;
+template <type_info::Persistable T>
+struct persisted;
 
 template <realm::type_info::Persistable T>
 struct persisted_base {
@@ -60,7 +62,8 @@ protected:
     friend struct property;
     template <StringLiteral, type_info::Propertyable ...Properties>
     friend struct schema;
-
+    template <type_info::TimestampPersistable X, typename U, typename V>
+    friend persisted<X>& operator +=(persisted<X>& a, std::chrono::duration<U, V> b);
     type as_core_type() const;
     void assign(const Obj& object, const ColKey& col_key);
     std::optional<Obj> m_obj;
@@ -138,6 +141,17 @@ struct persisted_noncontainer_base : public persisted_base<T> {
     bool operator >=(const T& a) requires (type_info::Comparable<T>);
 };
 
+template <type_info::TimestampPersistable T, typename U, typename V>
+persisted<T>& operator +=(persisted<T>& a, std::chrono::duration<U, V> b) {
+    if (auto m_obj = a.m_obj) {
+        auto ts = m_obj->template get<Timestamp>(a.managed);
+        m_obj->template set(a.managed, Timestamp(ts.get_time_point() + b));
+    } else {
+        a.unmanaged += b;
+    }
+    return a;
+}
+
 template <type_info::NonContainerPersistable T>
 struct persisted<T> : public persisted_noncontainer_base<T> {
     using persisted_noncontainer_base<T>::persisted_noncontainer_base;
@@ -165,6 +179,38 @@ struct persisted<T> : public persisted_container_base<T> {
     using persisted_container_base<T>::operator=;
 };
 
+template <realm::type_info::BinaryPersistable T>
+struct persisted_binary_base : public persisted_base<T> {
+    using value_type = typename T::value_type;
+    using size_type = typename T::size_type;
+
+    typename T::value_type operator[](size_type pos)
+    {
+        if (this->m_obj) {
+            return this->m_obj->template get<BinaryData>(this->managed)[pos];
+        } else {
+            return this->unmanaged[pos];
+        }
+    }
+    void push_back(value_type a)
+    {
+        if (this->m_obj) {
+            BinaryData data = this->m_obj->template get<BinaryData>(this->managed);
+            std::string data_tmp = data.data();
+            data_tmp += a;
+            data = BinaryData(data_tmp);
+            this->m_obj->set(this->managed, data);
+        } else {
+            this->unmanaged.push_back(a);
+        }
+    }
+};
+
+template <realm::type_info::BinaryPersistable T>
+struct persisted<T> : public persisted_binary_base<T> {
+    using persisted_binary_base<T>::persisted_binary_base;
+    using persisted_binary_base<T>::operator=;
+};
 
 // MARK: Implementation
 

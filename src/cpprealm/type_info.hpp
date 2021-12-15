@@ -25,6 +25,9 @@
 #include <realm/object-store/property.hpp>
 #include <realm/obj.hpp>
 
+namespace realm {
+    using uuid = realm::UUID;
+}
 namespace realm::type_info {
 
 template <typename T>
@@ -73,6 +76,26 @@ concept DoublePersistable = std::is_floating_point_v<T> && requires(T a) {
 template <DoublePersistable T>
 struct persisted_type<T> { using type = double; };
 
+template <typename C = std::chrono::system_clock, typename D = typename C::duration>
+concept TimestampPersistable = requires (std::chrono::time_point<C, D> tp) {
+    { static_cast<realm::Timestamp>(tp) };
+};
+template <TimestampPersistable T>
+struct persisted_type<T> { using type = realm::Timestamp; };
+
+template <typename T>
+concept UUIDPersistable = std::is_same_v<T, uuid>;
+
+template <UUIDPersistable T>
+struct persisted_type<T> { using type = realm::UUID; };
+
+template <typename T>
+concept BinaryPersistable = std::is_same_v<T, std::vector<std::uint8_t>>;
+
+template <BinaryPersistable T>
+struct persisted_type<T> { using type = realm::BinaryData; };
+
+
 template <class T>
 struct is_optional : std::false_type {
     using type = std::false_type::value_type;
@@ -96,14 +119,23 @@ template <ObjectPersistable T>
 struct persisted_type<T> { using type = realm::ObjKey; };
 
 template <typename T>
-concept PrimitivePersistable = IntPersistable<T> || BoolPersistable<T> || StringPersistable<T> || EnumPersistable<T> || DoublePersistable<T>;
+concept PrimitivePersistable = IntPersistable<T>
+        || BoolPersistable<T>
+        || StringPersistable<T>
+        || EnumPersistable<T>
+        || DoublePersistable<T>
+        || TimestampPersistable<T>
+        || UUIDPersistable<T>
+        || BinaryPersistable<T>;
 
 template <typename T>
 concept NonOptionalPersistable = PrimitivePersistable<T> || ObjectPersistable<T>;
 
 // MARK: ListPersistable
 template <typename T>
-concept ListPersistable = NonOptionalPersistable<typename T::value_type> && std::is_same_v<std::vector<typename T::value_type>, T> && requires(T a) {
+concept ListPersistable = !std::is_same_v<typename T::value_type, std::uint8_t>
+    && NonOptionalPersistable<typename T::value_type>
+    && std::is_same_v<std::vector<typename T::value_type>, T> && requires(T a) {
     typename T::value_type;
     typename T::size_type;
     typename T::allocator_type;
@@ -134,7 +166,14 @@ concept Persistable = NonOptionalPersistable<T> || OptionalPersistable<T> || Lis
 template <PrimitivePersistable T>
 constexpr typename persisted_type<T>::type convert_if_required(const T& a)
 {
-    return a;
+    if constexpr (BinaryPersistable<T>) {
+        if (a.empty()) {
+            return BinaryData("");
+        }
+        return BinaryData(reinterpret_cast<const char *>(a.data()), a.size());
+    } else {
+        return a;
+    }
 }
 template <OptionalObjectPersistable T>
 static constexpr typename persisted_type<T>::type convert_if_required(const T& a)
@@ -166,6 +205,15 @@ template<OptionalPersistable T> static constexpr PropertyType property_type() {
 }
 template<DoublePersistable T> static constexpr PropertyType property_type() {
     return PropertyType::Double;
+}
+template<TimestampPersistable T> static constexpr PropertyType property_type() {
+    return PropertyType::Date;
+}
+template<UUIDPersistable T> static constexpr PropertyType property_type() {
+    return PropertyType::UUID;
+}
+template<BinaryPersistable T> static constexpr PropertyType property_type() {
+    return PropertyType::Data;
 }
 template<EnumPersistable T> static constexpr PropertyType property_type() {
     return PropertyType::Int;

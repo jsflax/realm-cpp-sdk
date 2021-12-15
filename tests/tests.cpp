@@ -34,12 +34,19 @@ struct AllTypesObject: realm::object {
 
     realm::persisted<int> _id;
     realm::persisted<Enum> enum_col;
+    realm::persisted<std::chrono::time_point<std::chrono::system_clock>> date_col;
+    realm::persisted<realm::uuid> uuid_col;
+    realm::persisted<std::vector<std::uint8_t>> binary_col;
+
     realm::persisted<std::vector<int>> list_int_col;
     realm::persisted<std::vector<AllTypesObjectLink>> list_obj_col;
 
     using schema = realm::schema<
         "AllTypesObject",
         realm::property<"_id", &AllTypesObject::_id, true>,
+        realm::property<"date_col", &AllTypesObject::date_col>,
+        realm::property<"uuid_col", &AllTypesObject::uuid_col>,
+        realm::property<"binary_col", &AllTypesObject::binary_col>,
         realm::property<"list_int_col", &AllTypesObject::list_int_col>,
         realm::property<"list_obj_col", &AllTypesObject::list_obj_col>>;
 };
@@ -56,11 +63,73 @@ bool assert_equals(const T& a, const V& b)
 
 #define assert_equals(a, b) \
 if (!assert_equals(a, b)) {\
-std::cout<<__FILE__<<"L"<<__LINE__<<":"<<#a<<" did not equal "<<#b<<std::endl;\
+std::cerr<<__FILE__<<" L"<<__LINE__<<": "<<#a<<" did not equal "<<#b<<std::endl;\
 }
 
-realm::task<void> test_all() {
-    auto realm = realm::open<Person, Dog>();
+namespace test {
+struct task_base {
+    struct promise_type {
+        coroutine_handle<> precursor;
+
+        task_base get_return_object() noexcept {
+            return task_base{coroutine_handle<promise_type>::from_promise(*this)};
+        }
+
+        suspend_never initial_suspend() const noexcept { return {}; }
+
+        void unhandled_exception() {
+            if (auto err = std::current_exception())
+                std::rethrow_exception(err);
+        }
+
+        auto final_suspend() const noexcept {
+            struct awaiter {
+                bool await_ready() const noexcept {
+                    return false;
+                }
+
+                void await_resume() const noexcept {
+                }
+                coroutine_handle<> await_suspend(coroutine_handle<promise_type> h) noexcept {
+                    auto precursor = h.promise().precursor;
+                    if (precursor) {
+                        return precursor;
+                    }
+                    return noop_coroutine();
+                }
+            };
+            return awaiter{};
+        }
+
+        void return_void() noexcept {
+        }
+    };
+    coroutine_handle<promise_type> handle;
+    std::string path;
+};
+template <realm::StringLiteral TestName>
+struct task : task_base {
+    bool await_ready() const noexcept {
+        return handle.done();
+    }
+
+    void await_resume() const noexcept {
+        handle.promise();
+    }
+
+    void await_suspend(coroutine_handle<> coroutine) const noexcept {
+        handle.promise().precursor = coroutine;
+    }
+
+    task() : task_base(TestName) {}
+    task(task_base&& t) : task_base({t.handle, TestName}) {}
+};
+}
+#define TEST(fn) \
+test::task<#fn> fn(std::string path = std::string(std::filesystem::current_path() / std::string(#fn)) + ".realm")
+
+TEST(all) {
+    auto realm = realm::open<Person, Dog>({.path=path});
 
     auto person = Person();
     person.name = "John";
@@ -114,8 +183,8 @@ realm::task<void> test_all() {
 }
 
 // MARK: Test List
-realm::task<void> testList() {
-    auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>();
+TEST(list) {
+    auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>({.path=path});
     auto obj = AllTypesObject{};
     obj.list_int_col.push_back(42);
     assert_equals(obj.list_int_col[0], 42);
@@ -130,7 +199,7 @@ realm::task<void> testList() {
 
     realm.write([&obj]() {
         obj.list_int_col.push_back(84);
-        obj.list_obj_col.push_back(AllTypesObjectLink{.str_col="Rex"});
+        obj.list_obj_col.push_back(AllTypesObjectLink{._id=1, .str_col="Rex"});
     });
     assert_equals(obj.list_int_col[0], 42);
     assert_equals(obj.list_int_col[1], 84);
@@ -139,8 +208,8 @@ realm::task<void> testList() {
     co_return;
 }
 
-realm::task<void> testThreadSafeReference() {
-    auto realm = realm::open<Person, Dog>();
+TEST(thread_safe_reference) {
+    auto realm = realm::open<Person, Dog>({.path=path});
 
     auto person = Person { .name = "John", .age = 17 };
     person.dog = Dog {.name = "Fido"};
@@ -153,8 +222,8 @@ realm::task<void> testThreadSafeReference() {
     std::condition_variable cv;
     std::mutex cv_m;
     bool done;
-    auto t = std::thread([&cv, &tsr, &done]() {
-        auto realm = realm::open<Person, Dog>();
+    auto t = std::thread([&cv, &tsr, &done, &path]() {
+        auto realm = realm::open<Person, Dog>({.path=path});
         auto person = realm.resolve(std::move(tsr));
         assert_equals(*person.age, 17);
         realm.write([&] { realm.remove(person); });
@@ -163,9 +232,8 @@ realm::task<void> testThreadSafeReference() {
     co_return;
 }
 
-realm::task<void> test_query()
-{
-    auto realm = realm::open<Person, Dog>();
+TEST(query) {
+    auto realm = realm::open<Person, Dog>({.path=path});
 
     auto person = Person { .name = "John", .age = 42 };
     realm.write([&realm, &person](){
@@ -174,8 +242,45 @@ realm::task<void> test_query()
 
     auto results = realm.objects<Person>().where("age > $0", {42});
     assert_equals(results.size(), 0);
-    results = realm.objects<Person>().where("age = %@", {42});
+    results = realm.objects<Person>().where("age = $0", {42});
     assert_equals(results.size(), 1);
+    co_return;
+}
+
+TEST(binary) {
+    auto realm = realm::open<AllTypesObject, AllTypesObjectLink>({.path=path});
+    auto obj = AllTypesObject();
+    obj.binary_col.push_back(1);
+    obj.binary_col.push_back(2);
+    obj.binary_col.push_back(3);
+    realm.write([&realm, &obj] {
+        realm.add(obj);
+    });
+    realm.write([&realm, &obj] {
+        obj.binary_col.push_back(4);
+    });
+    assert_equals(obj.binary_col[0], 1);
+    assert_equals(obj.binary_col[1], 2);
+    assert_equals(obj.binary_col[2], 3);
+    assert_equals(obj.binary_col[3], 4);
+    co_return;
+}
+
+TEST(date) {
+    auto realm = realm::open<AllTypesObject, AllTypesObjectLink>({.path=path});
+    auto obj = AllTypesObject();
+    assert_equals(obj.date_col, std::chrono::time_point<std::chrono::system_clock>{});
+    auto now = std::chrono::system_clock::now();
+    obj.date_col = now;
+    assert_equals(obj.date_col, now);
+    realm.write([&realm, &obj] {
+        realm.add(obj);
+    });
+    assert_equals(obj.date_col, now);
+    realm.write([&realm, &obj] {
+        obj.date_col += std::chrono::seconds(42);
+    });
+    assert_equals(obj.date_col, now + std::chrono::seconds(42));
     co_return;
 }
 
@@ -188,24 +293,29 @@ struct Foo: realm::object {
 
 int main() {
 
-        auto tasks = {
-            test_all(),
-            testThreadSafeReference(),
-            testList(),
-            test_query()
+    std::vector<test::task_base> tasks = {
+        all(),
+        thread_safe_reference(),
+        list(),
+        query(),
+        binary(),
+        date()
+    };
+    {
+        while (std::transform_reduce(tasks.begin(), tasks.end(), true,
+                                     [](bool done1, bool done2) -> bool { return done1 && done2; },
+                                     [](const auto& task) -> bool { return task.handle.done(); }) == false) {
         };
-        {
-            while (std::transform_reduce(tasks.begin(), tasks.end(), true,
-                                         [](bool done1, bool done2) -> bool { return done1 && done2; },
-                                         [](const realm::task<void>& task) -> bool { return task.handle.done(); }) == false) {
-            };
-        }
+    }
+    for (auto& task : tasks) {
+        auto path = task.path;
+        std::filesystem::remove(std::filesystem::current_path() / std::string(path + ".realm"));
+        std::filesystem::remove(std::filesystem::current_path() / std::string(path + ".realm.lock"));
+        std::filesystem::remove(std::filesystem::current_path() / std::string(path + ".realm.note"));
+    }
 
-    std::filesystem::remove(realm::db_config{}.path);
-    std::filesystem::remove(realm::db_config{}.path + ".lock");
-    std::filesystem::remove(realm::db_config{}.path + ".note");
     std::cout<<success_count<<"/"<<success_count + fail_count<<" checks completed successfully."<<std::endl;
-    return 0;
+    return fail_count;
 }
 
 //@end

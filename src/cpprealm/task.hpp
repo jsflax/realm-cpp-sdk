@@ -58,7 +58,10 @@ struct task {
         suspend_never initial_suspend() const noexcept { return {}; }
 
         // If an exception was thrown in the coroutine body, we would handle it here
-        void unhandled_exception() {}
+        void unhandled_exception() {
+            if (auto err = std::current_exception())
+                std::rethrow_exception(err);
+        }
 
         // The coroutine is about to complete (via co_return or reaching the end of the coroutine body).
         // The awaiter returned here defines what happens next
@@ -140,7 +143,10 @@ struct task<void> {
         }
 
         // If an exception was thrown in the coroutine body, we would handle it here
-        void unhandled_exception() {}
+        void unhandled_exception() {
+            if (auto err = std::current_exception())
+                std::rethrow_exception(err);
+        }
 
         // The coroutine is about to complete (via co_return or reaching the end of the coroutine body).
         // The awaiter returned here defines what happens next
