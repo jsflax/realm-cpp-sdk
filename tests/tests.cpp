@@ -191,9 +191,14 @@ TEST(list) {
 
     obj.list_obj_col.push_back(AllTypesObjectLink{.str_col="Fido"});
     assert_equals(obj.list_obj_col[0].str_col, "Fido");
+    assert_equals(obj.list_int_col.size(), 1);
+    for (auto& i : obj.list_int_col) {
+        assert_equals(i, 42);
+    }
     realm.write([&realm, &obj]() {
         realm.add(obj);
     });
+
     assert_equals(obj.list_int_col[0], 42);
     assert_equals(obj.list_obj_col[0].str_col, "Fido");
 
@@ -201,6 +206,12 @@ TEST(list) {
         obj.list_int_col.push_back(84);
         obj.list_obj_col.push_back(AllTypesObjectLink{._id=1, .str_col="Rex"});
     });
+    size_t idx = 0;
+    for (auto& i : obj.list_int_col) {
+        assert_equals(i, obj.list_int_col[idx]);
+        ++idx;
+    }
+    assert_equals(obj.list_int_col.size(), 2);
     assert_equals(obj.list_int_col[0], 42);
     assert_equals(obj.list_int_col[1], 84);
     assert_equals(obj.list_obj_col[0].str_col, "Fido");

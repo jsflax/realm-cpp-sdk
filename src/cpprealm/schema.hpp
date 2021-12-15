@@ -40,7 +40,6 @@ struct ptr_type_extractor_base<Result Class::*>
 template <auto T>
 struct ptr_type_extractor : ptr_type_extractor_base<decltype(T)> {
 };
-
 }
 
 // MARK: property

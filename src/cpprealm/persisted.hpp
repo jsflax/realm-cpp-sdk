@@ -165,6 +165,80 @@ struct persisted_container_base : public persisted_base<T> {
     using value_type = typename T::value_type;
     using size_type = typename T::size_type;
 
+    class iterator {
+    public:
+        using difference_type = size_type;
+        using value_type = value_type;
+        using pointer = value_type*;
+        using reference = value_type&;
+        using iterator_category = std::input_iterator_tag;
+
+        bool operator!=(const iterator& other) const
+        {
+            return !(*this == other);
+        }
+
+        bool operator==(const iterator& other) const
+        {
+            return (m_parent == other.m_parent) && (m_idx == other.m_idx);
+        }
+
+        reference operator*() noexcept
+        {
+            value = (*m_parent)[m_idx];
+            return value;
+        }
+
+        pointer operator->() const noexcept
+        {
+            value = (*m_parent)[m_idx];
+            return &value;
+        }
+
+        iterator& operator++()
+        {
+            m_idx++;
+            return *this;
+        }
+
+        iterator operator++(int i)
+        {
+            m_idx += i;
+            return *this;
+        }
+    private:
+        friend struct persisted_container_base<T>;
+
+        iterator(size_t idx, persisted_container_base<T>* parent)
+                : m_idx(idx)
+                , m_parent(parent)
+        {
+        }
+
+        size_t m_idx;
+        persisted_container_base<T>* m_parent;
+        value_type value;
+    };
+
+    iterator begin()
+    {
+        return iterator(0, this);
+    }
+
+    iterator end()
+    {
+        return iterator(size(), this);
+    }
+
+    size_t size()
+    {
+        if (this->m_obj) {
+            auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+            return lst.size();
+        } else {
+            return this->unmanaged.size();
+        }
+    }
     typename T::value_type operator[](size_type pos) requires (type_info::PrimitivePersistable<value_type>);
     typename T::value_type operator[](size_type pos) requires (type_info::ObjectPersistable<value_type>);
 
