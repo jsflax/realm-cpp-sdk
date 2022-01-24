@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.15)
 project(realm)
 
 # Project-wide build flags
-#set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)
 #set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #set(CMAKE_CXX_EXTENSIONS OFF)
 #set(CMAKE_CXX20_STANDARD_COMPILE_OPTION "-std=c++2a")
@@ -46,7 +46,7 @@ set(HEADERS
 ) # REALM_INSTALL_HEADERS
 
 add_library(cpprealm STATIC ${SOURCES} ${HEADERS})
-add_executable(cpprealm_exe_tests tests/tests.cpp)
+add_executable(cpprealm_exe_tests tests/tests.cpp tests/str_tests.cpp tests/test_utils.hpp tests/test_objects.hpp tests/test_utils.cpp)
 #add_test(cpprealm_tests)
 
 target_include_directories(cpprealm PRIVATE realm-core/src)
