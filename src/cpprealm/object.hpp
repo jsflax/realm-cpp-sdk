@@ -209,8 +209,8 @@ inline bool operator==(const T& lhs, const T& rhs) {
     if (lhs.is_managed() && rhs.is_managed()) {
         return *lhs.m_obj == *rhs.m_obj && rhs.m_realm == lhs.m_realm;
     } else if (!lhs.is_managed() && !rhs.is_managed()) {
-        // TODO: compare each property?
-        return false;
+        // TODO: the vector doesnt seem to push back by ref?
+        return false;//std::addressof(lhs) == std::addressof(rhs);
     }
     return false;
 };

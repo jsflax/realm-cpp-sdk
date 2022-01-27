@@ -134,9 +134,8 @@ TEST(list_insert_remove_object) {
     obj.list_obj_col.push_back(o2);
     obj.list_obj_col.push_back(o3);
     obj.list_obj_col.push_back(o4);
-//    size_t index = obj.list_obj_col.find(o5);
-//    CHECK_EQUALS(obj.list_obj_col.find(o5), 0);
-//    CHECK_EQUALS(obj.list_obj_col[1], o5); operands issue
+    CHECK_EQUALS(obj.list_obj_col.find(o4), 0);
+    CHECK_EQUALS(obj.list_obj_col[1], o5);
 
     auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>({.path=path});
     realm.write([&realm, &obj] {
@@ -157,7 +156,7 @@ TEST(list_insert_remove_object) {
 
     CHECK_EQUALS(obj.list_obj_col.size(), 5);
     CHECK_EQUALS(obj.list_obj_col.find(o5), 4);
-//    CHECK_EQUALS(obj.list_obj_col[2], o1); //operands issue
+    CHECK_EQUALS(obj.list_obj_col[2], o1);
 
     realm.write([&obj] {
         obj.list_obj_col.pop_back();

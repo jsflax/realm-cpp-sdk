@@ -84,8 +84,8 @@ TEST(tsq_basic_comparison) {
     validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o._id != 123; });
     validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.str_col == "foo bar"; });
     validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.str_col != "foo bar"; });
-//    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.binary_col == std::vector<u_int8_t>({0, 1, 2, 3}); });
-//    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.binary_col != std::vector<u_int8_t>({0, 1, 2, 3}); });
+    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.binary_col == std::vector<u_int8_t>({0, 1, 2, 3}); });
+    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.binary_col != std::vector<u_int8_t>({0, 1, 2, 3}); });
 //    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col == AllTypesObject::Enum::two; });
 //    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col != AllTypesObject::Enum::two; });
     validate_equals<AllTypesObject>(realm, 1U, [&date](auto& o) { return o.date_col == std::chrono::system_clock::from_time_t(date); });
@@ -99,8 +99,8 @@ TEST(tsq_basic_comparison) {
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o._id != obj2._id; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.str_col == obj2.str_col; });
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.str_col != obj2.str_col; });
-//    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.binary_col == obj2.binary_col; });
-//    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.binary_col != obj2.binary_col; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.binary_col == obj2.binary_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.binary_col != obj2.binary_col; });
 //    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col == obj2.enum_col; });
 //    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col != obj2.enum_col; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.date_col == obj2.date_col; });

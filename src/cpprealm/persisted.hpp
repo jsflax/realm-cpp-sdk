@@ -103,11 +103,15 @@ protected:
 
     template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const V& b) requires (Equatable<V>);
+    template <realm::type_info::BinaryPersistable V>
+    friend rbool operator==(const persisted<V>& a, const V& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const persisted<V>& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const char* b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
+    friend rbool operator!=(const persisted<V>& a, const V& b) requires (Equatable<V>);
+    template <realm::type_info::BinaryPersistable V>
     friend rbool operator!=(const persisted<V>& a, const V& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator!=(const persisted<V>& a, const persisted<V>& b) requires (Equatable<V>);
@@ -714,6 +718,9 @@ T persisted_base<T>::operator *() const
                 }
 
                 return v;
+            } if constexpr (std::is_same_v<realm::BinaryData, type>) {
+                realm::BinaryData binary = m_obj->template get<type>(managed);
+                return std::vector<u_int8_t>(binary.data(), binary.data() + binary.size());
             } else {
                 return static_cast<T>(m_obj->template get<type>(managed));
             }
@@ -743,6 +750,8 @@ class rbool {
     friend rbool operator &&(const rbool& lhs, const rbool& rhs);
     template <realm::type_info::Persistable T>
     friend rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>);
+    template <realm::type_info::BinaryPersistable T>
+    friend rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
     friend rbool operator==(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
@@ -754,6 +763,8 @@ class rbool {
     friend struct results;
 
     template <realm::type_info::Persistable T>
+    friend rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>);
+    template <realm::type_info::BinaryPersistable T>
     friend rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
     friend rbool operator!=(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>);
@@ -798,6 +809,18 @@ rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>)
     }
     return *a == b;
 }
+
+template <realm::type_info::BinaryPersistable T>
+rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>)
+{
+    if (a.should_detect_usage_for_queries) {
+        auto query = Query(a.query->get_table());
+        query.equal(a.managed, BinaryData(reinterpret_cast<const char *>(b.data()), b.size()));
+        return {std::move(query)};
+    }
+    return *a == b;
+}
+
 template <realm::type_info::Persistable T>
 rbool operator==(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>)
 {
@@ -815,6 +838,16 @@ rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>)
     if (a.should_detect_usage_for_queries) {
         auto query = Query(a.query->get_table());
         query.not_equal(a.managed, b);
+        return {std::move(query)};
+    }
+    return !(a == b);
+}
+template <realm::type_info::BinaryPersistable T>
+rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>)
+{
+    if (a.should_detect_usage_for_queries) {
+        auto query = Query(a.query->get_table());
+        query.equal(a.managed, BinaryData(reinterpret_cast<const char *>(b.data()), b.size()));
         return {std::move(query)};
     }
     return !(a == b);
@@ -1011,6 +1044,14 @@ template <realm::type_info::Persistable T>
 std::ostream& operator<< (std::ostream& stream, const persisted<T>& value)
 {
     stream << *value;
+}
+
+template <realm::type_info::Persistable T>
+std::ostream& operator<< (std::ostream& stream, const T& object)
+{
+    return stream;
+//    stream << "object";
+    
 }
 
 }
