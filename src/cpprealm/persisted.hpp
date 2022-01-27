@@ -104,7 +104,13 @@ protected:
     template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const V& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
+    friend rbool operator==(const persisted<V>& a, const persisted<V>& b) requires (Equatable<V>);
+    template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const char* b) requires (Equatable<V>);
+    template <realm::type_info::Persistable V>
+    friend rbool operator!=(const persisted<V>& a, const V& b) requires (Equatable<V>);
+    template <realm::type_info::Persistable V>
+    friend rbool operator!=(const persisted<V>& a, const persisted<V>& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator!=(const persisted<V>& a, const char* b) requires (Equatable<V>);
 };
@@ -177,8 +183,12 @@ struct persisted_noncontainer_base : public persisted_base<T> {
     void operator ++() requires (type_info::AddAssignable<T>);
     rbool operator <(const T& a) requires (type_info::Comparable<T>);
     rbool operator >(const T& a) requires (type_info::Comparable<T>);
-    bool operator <=(const T& a) requires (type_info::Comparable<T>);
-    bool operator >=(const T& a) requires (type_info::Comparable<T>);
+    rbool operator <=(const T& a) requires (type_info::Comparable<T>);
+    rbool operator >=(const T& a) requires (type_info::Comparable<T>);
+    rbool operator <(const persisted<T>& a) requires (type_info::Comparable<T>);
+    rbool operator >(const persisted<T>& a) requires (type_info::Comparable<T>);
+    rbool operator <=(const persisted<T>& a) requires (type_info::Comparable<T>);
+    rbool operator >=(const persisted<T>& a) requires (type_info::Comparable<T>);
     rbool contains(const char* str) requires (std::is_same_v<T, std::string>);
 };
 
@@ -734,15 +744,22 @@ class rbool {
     template <realm::type_info::Persistable T>
     friend rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
+    friend rbool operator==(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>);
+    template <realm::type_info::Persistable T>
     friend rbool operator==(const persisted<T>& a, const char* b) requires (Equatable<T>);
+
     template <realm::type_info::NonContainerPersistable T>
     friend struct persisted_noncontainer_base;
     template <typename T>
     friend struct results;
+
     template <realm::type_info::Persistable T>
     friend rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
+    friend rbool operator!=(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>);
+    template <realm::type_info::Persistable T>
     friend rbool operator!=(const persisted<T>& a, const char* b) requires (Equatable<T>);
+
     friend rbool operator ||(const rbool& lhs, const rbool& rhs);
 public:
     ~rbool() {
@@ -782,11 +799,32 @@ rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>)
     return *a == b;
 }
 template <realm::type_info::Persistable T>
+rbool operator==(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>)
+{
+    if (a.should_detect_usage_for_queries) {
+        auto query = Query(a.query->get_table());
+        query.equal(a.managed, b.managed);
+        return {std::move(query)};
+    }
+    return *a == *b;
+}
+
+template <realm::type_info::Persistable T>
 rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>)
 {
     if (a.should_detect_usage_for_queries) {
         auto query = Query(a.query->get_table());
         query.not_equal(a.managed, b);
+        return {std::move(query)};
+    }
+    return !(a == b);
+}
+template <realm::type_info::Persistable T>
+rbool operator!=(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>)
+{
+    if (a.should_detect_usage_for_queries) {
+        auto query = Query(a.query->get_table());
+        query.not_equal(a.managed, b.managed);
         return {std::move(query)};
     }
     return !(a == b);
@@ -873,8 +911,14 @@ void persisted_noncontainer_base<T>::operator ++() requires (type_info::AddAssig
 }
 
 // MARK: Comparisons
+
 template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator <(const T& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.less(this->managed, a);
+        return {std::move(query)};
+    }
     return **this < a;
 }
 template <realm::type_info::NonContainerPersistable T>
@@ -887,12 +931,59 @@ rbool persisted_noncontainer_base<T>::operator >(const T& a) requires (type_info
     return **this > a;
 }
 template <realm::type_info::NonContainerPersistable T>
-bool persisted_noncontainer_base<T>::operator <=(const T& a) requires (type_info::Comparable<T>) {
+rbool persisted_noncontainer_base<T>::operator <=(const T& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.less_equal(this->managed, a);
+        return {std::move(query)};
+    }
     return **this <= a;
 }
 template <realm::type_info::NonContainerPersistable T>
-bool persisted_noncontainer_base<T>::operator >=(const T& a) requires (type_info::Comparable<T>) {
+rbool persisted_noncontainer_base<T>::operator >=(const T& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.greater_equal(this->managed, a);
+        return {std::move(query)};
+    }
     return **this >= a;
+}
+
+template <realm::type_info::NonContainerPersistable T>
+rbool persisted_noncontainer_base<T>::operator <(const persisted<T>& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.less(this->managed, a.managed);
+        return {std::move(query)};
+    }
+    return **this < *a;
+}
+template <realm::type_info::NonContainerPersistable T>
+rbool persisted_noncontainer_base<T>::operator >(const persisted<T>& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.greater(this->managed, a.managed);
+        return {std::move(query)};
+    }
+    return **this > *a;
+}
+template <realm::type_info::NonContainerPersistable T>
+rbool persisted_noncontainer_base<T>::operator <=(const persisted<T>& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.less_equal(this->managed, a.managed);
+        return {std::move(query)};
+    }
+    return **this <= *a;
+}
+template <realm::type_info::NonContainerPersistable T>
+rbool persisted_noncontainer_base<T>::operator >=(const persisted<T>& a) requires (type_info::Comparable<T>) {
+    if (this->should_detect_usage_for_queries) {
+        auto query = Query(this->query->get_table());
+        query.greater_equal(this->managed, a.managed);
+        return {std::move(query)};
+    }
+    return **this >= *a;
 }
 
 template <type_info::NonContainerPersistable T>

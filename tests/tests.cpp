@@ -138,33 +138,4 @@ TEST(date) {
     co_return;
 }
 
-TEST(type_safe_query) {
-    auto realm = realm::open<Person, Dog>({.path=path});
-
-    auto person = Person { .name = "John", .age = 42 };
-    realm.write([&realm, &person](){
-        realm.add(person);
-    });
-
-    auto results = realm.objects<Person>().where([](Person& person) {
-        return person.age > 42;
-    });
-    CHECK_EQUALS(results.size(), 0);
-    results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 42;
-    });
-    CHECK_EQUALS(results.size(), 1);
-    results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 42 && person.name != "John";
-    });
-    CHECK_EQUALS(results.size(), 0);
-
-    results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 42 && person.name.contains("oh");
-    });
-    CHECK_EQUALS(results.size(), 1);
-    co_return;
-}
-
-
 //@end

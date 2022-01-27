@@ -157,7 +157,7 @@ TEST(list_insert_remove_object) {
 
     CHECK_EQUALS(obj.list_obj_col.size(), 5);
     CHECK_EQUALS(obj.list_obj_col.find(o5), 4);
-//    CHECK_EQUALS(obj.list_obj_col[2], o1); operands issue
+//    CHECK_EQUALS(obj.list_obj_col[2], o1); //operands issue
 
     realm.write([&obj] {
         obj.list_obj_col.pop_back();

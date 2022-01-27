@@ -177,17 +177,6 @@ struct object {
         return m_obj.has_value();
     }
 
-    template <typename T>
-    bool operator==(const T& other) const {
-        if (is_managed() && other.is_managed()) {
-            return *m_obj == *other.m_obj;
-        } else if (!is_managed() && !other.is_managed()) {
-            // TODO
-            return false;
-        }
-        return false;
-    };
-
 private:
     template <type_info::Persistable T>
     friend struct persisted_base;
@@ -208,8 +197,22 @@ private:
     template <realm::type_info::ListPersistable T>
     friend struct persisted_container_base;
 
+    template <type_info::ObjectPersistable T>
+    friend inline bool operator==(const T& lhs, const T& rhs);
+
     std::shared_ptr<Realm> m_realm = nullptr;
     std::optional<Obj> m_obj;
+};
+
+template <type_info::ObjectPersistable T>
+inline bool operator==(const T& lhs, const T& rhs) {
+    if (lhs.is_managed() && rhs.is_managed()) {
+        return *lhs.m_obj == *rhs.m_obj && rhs.m_realm == lhs.m_realm;
+    } else if (!lhs.is_managed() && !rhs.is_managed()) {
+        // TODO: compare each property?
+        return false;
+    }
+    return false;
 };
 
 // MARK: - Implementations
