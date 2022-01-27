@@ -43,6 +43,11 @@ struct AllTypesObject: realm::object {
     realm::persisted<std::vector<std::uint8_t>> binary_col;
 
     realm::persisted<std::vector<int>> list_int_col;
+    realm::persisted<std::vector<std::string>> list_str_col;
+    realm::persisted<std::vector<realm::uuid>> list_uuid_col;
+    realm::persisted<std::vector<std::vector<std::uint8_t>>> list_binary_col;
+    realm::persisted<std::vector<std::chrono::time_point<std::chrono::system_clock>>> list_date_col;
+
     realm::persisted<std::vector<AllTypesObjectLink>> list_obj_col;
 
     using schema = realm::schema<

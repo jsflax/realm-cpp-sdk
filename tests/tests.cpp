@@ -1,6 +1,9 @@
 #include "test_utils.hpp"
 #include "test_objects.hpp"
 
+#include <realm/object-store/impl/realm_coordinator.hpp>
+
+
 TEST(all) {
     auto realm = realm::open<Person, Dog>({.path=path});
 
@@ -18,15 +21,19 @@ TEST(all) {
     auto dog = **person.dog;
     CHECK_EQUALS(*dog.name, "Fido");
 
-    auto token = person.observe<Person>([](auto&& change) {
+    bool did_run = false;
+    auto token = person.observe<Person>([&did_run](auto&& change) {
         CHECK_EQUALS(change.property.name, "age");
         CHECK_EQUALS(std::any_cast<int>(*change.property.new_value), 19);
+        did_run = true;
     });
 
     realm.write([&person] {
         person.age += 2;
     });
+    realm.write([] { });
 
+    CHECK_EQUALS(did_run, true);
     CHECK_EQUALS(*person.age, 19);
 
     auto persons = realm.objects<Person>();
@@ -52,43 +59,6 @@ TEST(all) {
 
     CHECK_EQUALS(*synced_realm.object<AllTypesObject>(1)._id, 1);
 
-    co_return;
-}
-
-// MARK: Test List
-TEST(list) {
-    auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>({.path=path});
-    auto obj = AllTypesObject{};
-    obj.list_int_col.push_back(42);
-    CHECK_EQUALS(obj.list_int_col[0], 42);
-
-    obj.list_obj_col.push_back(AllTypesObjectLink{.str_col="Fido"});
-    CHECK_EQUALS(obj.list_obj_col[0].str_col, "Fido");
-    CHECK_EQUALS(obj.list_int_col.size(), 1);
-    for (auto& i : obj.list_int_col) {
-        CHECK_EQUALS(i, 42);
-    }
-    realm.write([&realm, &obj]() {
-        realm.add(obj);
-    });
-
-    CHECK_EQUALS(obj.list_int_col[0], 42);
-    CHECK_EQUALS(obj.list_obj_col[0].str_col, "Fido");
-
-    realm.write([&obj]() {
-        obj.list_int_col.push_back(84);
-        obj.list_obj_col.push_back(AllTypesObjectLink{._id=1, .str_col="Rex"});
-    });
-    size_t idx = 0;
-    for (auto& i : obj.list_int_col) {
-        CHECK_EQUALS(i, obj.list_int_col[idx]);
-        ++idx;
-    }
-    CHECK_EQUALS(obj.list_int_col.size(), 2);
-    CHECK_EQUALS(obj.list_int_col[0], 42);
-    CHECK_EQUALS(obj.list_int_col[1], 84);
-    CHECK_EQUALS(obj.list_obj_col[0].str_col, "Fido");
-    CHECK_EQUALS(obj.list_obj_col[1].str_col, "Rex");
     co_return;
 }
 

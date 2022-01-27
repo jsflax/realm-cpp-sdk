@@ -19,6 +19,7 @@
 #ifndef realm_object_hpp
 #define realm_object_hpp
 
+#include <cpprealm/notifications.hpp>
 #include <cpprealm/type_info.hpp>
 #include <cpprealm/schema.hpp>
 
@@ -36,46 +37,7 @@ struct Realm;
 struct NotificationToken;
 struct object;
 
-// MARK: NotificationToken
-/**
- A token which is returned from methods which subscribe to changes to a `realm::object`.
- */
-struct notification_token {
-private:
-    friend struct object;
-    realm::Object m_object;
-    realm::NotificationToken m_token;
-};
 
-// MARK: PropertyChange
-/**
- Information about a specific property which changed in an `realm::object` change notification.
- */
-struct PropertyChange {
-    /**
-     The name of the property which changed.
-    */
-    std::string name;
-
-    /**
-     Value of the property before the change occurred. This is not supplied if
-     the change happened on the same thread as the notification and for `List`
-     properties.
-
-     For object properties this will give the object which was previously
-     linked to, but that object will have its new values and not the values it
-     had before the changes. This means that `previousValue` may be a deleted
-     object, and you will need to check `isInvalidated` before accessing any
-     of its properties.
-    */
-    std::optional<std::any> old_value;
-
-    /**
-     The value of the property after the change occurred. This is not supplied
-     for `List` properties and will always be nil.
-    */
-    std::optional<std::any> new_value;
-};
 
 // MARK: ObjectChange
 /**
@@ -211,6 +173,21 @@ struct object {
     template <typename T>
     notification_token observe(std::function<void(ObjectChange<T>)> block);
 
+    bool is_managed() const {
+        return m_obj.has_value();
+    }
+
+    template <typename T>
+    bool operator==(const T& other) const {
+        if (is_managed() && other.is_managed()) {
+            return *m_obj == *other.m_obj;
+        } else if (!is_managed() && !other.is_managed()) {
+            // TODO
+            return false;
+        }
+        return false;
+    };
+
 private:
     template <type_info::Persistable T>
     friend struct persisted_base;
@@ -339,7 +316,7 @@ notification_token object::observe(std::function<void(ObjectChange<T>)> block) {
                     block(ObjectChange<T> { .is_deleted = true });
                 }
             } else {
-                for (size_t i; i < property_names.size(); i++) {
+                for (size_t i = 0; i < property_names.size(); i++) {
                     PropertyChange property;
                     property.name = property_names[i];
                     if (old_values.size()) {

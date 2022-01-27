@@ -77,7 +77,7 @@ struct property {
     }
 
     static void assign(Class& object, ColKey col_key, SharedRealm realm) {
-        (object.*Ptr).assign(*object.m_obj, col_key);
+        (object.*Ptr).assign(*object.m_obj, col_key, realm);
     }
 
     static void set(Class& object, ColKey col_key) {
@@ -201,7 +201,7 @@ struct schema {
         } else {
             managed = table->create_object(ObjKey{});
         }
-        object.m_obj = managed;
+        object.m_obj = managed; // This gets set twice?
         set(object);
         initialize(object, std::move(managed), realm);
     }

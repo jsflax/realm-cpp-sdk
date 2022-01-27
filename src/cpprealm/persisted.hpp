@@ -19,14 +19,23 @@
 #ifndef realm_persisted_hpp
 #define realm_persisted_hpp
 
+#include <cpprealm/notifications.hpp>
 #include <cpprealm/type_info.hpp>
+
 #include <realm/query.hpp>
+
+#include <realm/object-store/list.hpp>
+#include <realm/object-store/shared_realm.hpp>
+
+#include <realm/util/functional.hpp>
 
 namespace realm {
 
 struct FieldValue;
 template <type_info::Persistable T>
 struct persisted;
+struct notification_token;
+struct CollectionChange;
 
 template <typename T>
 concept Equatable = requires (T a) {
@@ -34,6 +43,7 @@ concept Equatable = requires (T a) {
 };
 
 class rbool;
+//struct notification_token;
 
 template <realm::type_info::Persistable T>
 struct persisted_base {
@@ -75,8 +85,9 @@ protected:
     template <type_info::TimestampPersistable X, typename U, typename V>
     friend persisted<X>& operator +=(persisted<X>& a, std::chrono::duration<U, V> b);
     type as_core_type() const;
-    void assign(const Obj& object, const ColKey& col_key);
+    void assign(const Obj& object, const ColKey& col_key, SharedRealm);
     std::optional<Obj> m_obj;
+    SharedRealm m_realm;
 
     // MARK: Queries
     bool should_detect_usage_for_queries = false;
@@ -191,7 +202,9 @@ struct persisted<T> : public persisted_noncontainer_base<T> {
 // MARK: Persisted List
 
 template <realm::type_info::ListPersistable T>
-struct persisted_container_base : public persisted_base<T> {
+class persisted_container_base : public persisted_base<T> {
+
+public:
     using value_type = typename T::value_type;
     using size_type = typename T::size_type;
 
@@ -275,7 +288,240 @@ struct persisted_container_base : public persisted_base<T> {
     void push_back(const value_type& a) requires (type_info::PrimitivePersistable<value_type>);
     void push_back(value_type& a) requires (type_info::ObjectPersistable<value_type>);
     void push_back(value_type&& a) requires (type_info::ObjectPersistable<value_type>);
+
+    void pop_back();
+    void erase(size_type pos);
+    void clear();
+
+    void set(size_type pos, const value_type& a) requires (type_info::PrimitivePersistable<value_type>);
+    void set(size_type pos, value_type& a) requires (type_info::ObjectPersistable<value_type>);
+    void set(size_type pos, value_type&& a) requires (type_info::ObjectPersistable<value_type>);
+
+    size_t find(const value_type& a) requires (type_info::PrimitivePersistable<value_type>);
+    size_t find(const value_type& a) requires (type_info::ObjectPersistable<value_type>);
+    size_t find(value_type&& a) requires (type_info::ObjectPersistable<value_type>);
+
+    notification_token observe(util::UniqueFunction<void(persisted<T>&,
+                                                         CollectionChange,
+                                                         std::exception_ptr)>);
 };
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::push_back(const typename T::value_type& a) requires (type_info::PrimitivePersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto as_core_type = static_cast<typename type_info::persisted_type<typename T::value_type>::type>(a);
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        lst.add(as_core_type);
+    } else {
+        this->unmanaged.push_back(a);
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::push_back(typename T::value_type& a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        if (!a.m_obj) {
+            T::value_type::schema::add(a, this->m_obj->get_table()->get_link_target(this->managed), nullptr);
+        }
+        lst.add(a.m_obj->get_key());
+    } else {
+        this->unmanaged.push_back(a);
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::push_back(typename T::value_type&& a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    push_back(a);
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::set(size_type pos, const typename T::value_type& a)
+requires (type_info::PrimitivePersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto as_core_type = static_cast<typename type_info::persisted_type<typename T::value_type>::type>(a);
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        lst.set(pos, as_core_type);
+    } else {
+        this->unmanaged[pos] = a;
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::set(size_type pos, typename T::value_type& a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        if (!a.m_obj) {
+            T::value_type::schema::add(a, this->m_obj->get_table()->get_link_target(this->managed), nullptr);
+        }
+        lst.set(pos, a.m_obj->get_key());
+    } else {
+        this->unmanaged[pos] = a;
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::set(size_type pos, typename T::value_type&& a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    set(pos, a);
+}
+
+template <realm::type_info::ListPersistable T>
+size_t persisted_container_base<T>::find(const typename T::value_type& a) requires (type_info::PrimitivePersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        if (auto size = lst.size()) {
+            return lst.find_first(a);
+        }
+    } else {
+        auto it = std::find(this->unmanaged.begin(), this->unmanaged.end(), a);
+        if (it != this->unmanaged.end()) {
+          return std::distance(this->unmanaged.begin(), it);
+        } else {
+            return UINTMAX_MAX;
+        }
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+size_t persisted_container_base<T>::find(const typename T::value_type& a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        if (!a.m_obj.has_value()) {
+            return UINTMAX_MAX;
+        }
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        if (auto size = lst.size()) {
+            return lst.find_first((*a.m_obj).get_key());
+        }
+    } else {
+        auto it = std::find(this->unmanaged.begin(), this->unmanaged.end(), a);
+        if (it != this->unmanaged.end()) {
+          return std::distance(this->unmanaged.begin(), it);
+        } else {
+            return UINTMAX_MAX;
+        }
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+size_t persisted_container_base<T>::find(typename T::value_type&& a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    return find(a);
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::pop_back() {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        if (auto size = lst.size()) {
+            lst.remove(size-1);
+        }
+    } else {
+        this->unmanaged.pop_back();
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::erase(size_type pos) {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        lst.remove(pos);
+    } else {
+        this->unmanaged.erase(this->unmanaged.begin() + pos);
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::clear() {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        lst.clear();
+    } else {
+        this->unmanaged.clear();
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+typename T::value_type persisted_container_base<T>::operator[](typename T::size_type a)
+requires (type_info::PrimitivePersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
+        return static_cast<typename T::value_type>(lst[a]);
+    } else {
+        return this->unmanaged[a];
+    }
+}
+
+template <realm::type_info::ListPersistable T>
+typename T::value_type persisted_container_base<T>::operator[](typename T::size_type a)
+requires (type_info::ObjectPersistable<typename T::value_type>) {
+    if (this->m_obj) {
+        auto lst = this->m_obj->get_linklist(this->managed);
+        return T::value_type::schema::create(lst.get_object(a), nullptr);
+    } else {
+        return this->unmanaged[a];
+    }
+}
+
+
+template <realm::type_info::ListPersistable T>
+struct CollectionCallbackWrapper {
+    util::UniqueFunction<void(persisted<T>&, CollectionChange, std::exception_ptr err)> handler;
+    persisted<T>& collection;
+    bool ignoreChangesInInitialNotification;
+
+    void operator()(realm::CollectionChangeSet const& changes, std::exception_ptr err) {
+        if (err) {
+            handler(collection, {{},{},{}}, err);
+            return;
+        }
+
+        if (ignoreChangesInInitialNotification) {
+            ignoreChangesInInitialNotification = false;
+            handler(collection, {{},{},{}}, nullptr);
+        }
+        else if (changes.empty()) {
+            handler(collection, {{},{},{}}, nullptr);
+
+        }
+        else if (!changes.collection_root_was_deleted || !changes.deletions.empty()) {
+            handler(collection,
+            {
+                to_vector(changes.deletions),
+                to_vector(changes.insertions),
+                to_vector(changes.modifications),
+            }, nullptr);
+        }
+    }
+
+private:
+    std::vector<u_int64_t> to_vector(const IndexSet& index_set) {
+        auto vector = std::vector<u_int64_t>();
+        for (auto index : index_set.as_indexes()) {
+            vector.push_back(index);
+        }
+        return vector;
+    };
+};
+
+template <realm::type_info::ListPersistable T>
+notification_token persisted_container_base<T>::observe(util::UniqueFunction<void(persisted<T>&,
+                                                                                  CollectionChange,
+                                                                                  std::exception_ptr)> handler)
+{
+    if (this->m_obj) {
+        notification_token token;
+        token.m_list = List(this->m_realm, *this->m_obj, this->managed);;
+        token.m_token = token.m_list.add_notification_callback(CollectionCallbackWrapper<T> { std::move(handler), *static_cast<persisted<T>*>(this), false });
+        return token;
+    } else {
+        return {};
+    }
+}
 
 template <realm::type_info::ListPersistable T>
 struct persisted<T> : public persisted_container_base<T> {
@@ -345,8 +591,13 @@ persisted_base<T>::~persisted_base()
 {
     if constexpr (realm::type_info::property_type<T>() == PropertyType::String) {
         using std::string;
-        if (!m_obj)
-            unmanaged.~string();
+        if (!m_obj) {
+            if constexpr(std::is_same_v<T, std::vector<std::string>>) {
+                // TODO: do we need to clear the vector?
+            } else {
+                    unmanaged.~string();
+            }
+        }
     }
 }
 template <realm::type_info::Persistable T>
@@ -658,64 +909,10 @@ rbool persisted_noncontainer_base<T>::contains(const char *str) requires(std::is
     }
 }
 
-// MARK: List Ops
-template <realm::type_info::ListPersistable T>
-void persisted_container_base<T>::push_back(const typename T::value_type& a) requires (type_info::PrimitivePersistable<typename T::value_type>) {
-    if (this->m_obj) {
-        auto as_core_type = static_cast<typename type_info::persisted_type<typename T::value_type>::type>(a);
-        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
-        lst.add(as_core_type);
-    } else {
-        this->unmanaged.push_back(a);
-    }
-}
-
-template <realm::type_info::ListPersistable T>
-void persisted_container_base<T>::push_back(typename T::value_type& a)
-requires (type_info::ObjectPersistable<typename T::value_type>) {
-    if (this->m_obj) {
-        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
-        if (!a.m_obj) {
-            T::value_type::schema::add(a, this->m_obj->get_table()->get_link_target(this->managed), nullptr);
-        }
-        lst.add(a.m_obj->get_key());
-    } else {
-        this->unmanaged.push_back(a);
-    }
-}
-
-template <realm::type_info::ListPersistable T>
-void persisted_container_base<T>::push_back(typename T::value_type&& a)
-requires (type_info::ObjectPersistable<typename T::value_type>) {
-    push_back(a);
-}
-
-
-template <realm::type_info::ListPersistable T>
-typename T::value_type persisted_container_base<T>::operator[](typename T::size_type a)
-requires (type_info::PrimitivePersistable<typename T::value_type>) {
-    if (this->m_obj) {
-        auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
-        return static_cast<typename T::value_type>(lst[a]);
-    } else {
-        return this->unmanaged[a];
-    }
-}
-
-template <realm::type_info::ListPersistable T>
-typename T::value_type persisted_container_base<T>::operator[](typename T::size_type a)
-requires (type_info::ObjectPersistable<typename T::value_type>) {
-    if (this->m_obj) {
-        auto lst = this->m_obj->get_linklist(this->managed);
-        return T::value_type::schema::create(lst.get_object(a), nullptr);
-    } else {
-        return this->unmanaged[a];
-    }
-}
-
 template <realm::type_info::Persistable T>
-void persisted_base<T>::assign(const Obj& object, const ColKey& col_key) {
+void persisted_base<T>::assign(const Obj& object, const ColKey& col_key, SharedRealm realm) {
     m_obj = object;
+    m_realm = realm;
     new (&managed) ColKey(col_key);
 }
 
