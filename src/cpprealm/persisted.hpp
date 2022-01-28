@@ -323,9 +323,14 @@ public:
 template <realm::type_info::ListPersistable T>
 void persisted_container_base<T>::push_back(const typename T::value_type& a) requires (type_info::PrimitivePersistable<typename T::value_type>) {
     if (this->m_obj) {
-        auto as_core_type = static_cast<typename type_info::persisted_type<typename T::value_type>::type>(a);
         auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
-        lst.add(as_core_type);
+        if constexpr (type_info::BinaryPersistable<typename T::value_type>) {
+            BinaryData core_type = BinaryData(reinterpret_cast<const char *>(a.data()), a.size());
+            lst.add(core_type);
+        } else {
+            auto as_core_type = static_cast<typename type_info::persisted_type<typename T::value_type>::type>(a);
+            lst.add(as_core_type);
+        }
     } else {
         this->unmanaged.push_back(a);
     }
@@ -464,7 +469,11 @@ typename T::value_type persisted_container_base<T>::operator[](typename T::size_
 requires (type_info::PrimitivePersistable<typename T::value_type>) {
     if (this->m_obj) {
         auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
-        return static_cast<typename T::value_type>(lst[a]);
+        if constexpr (realm::type_info::BinaryPersistable<typename T::value_type>) {
+            return std::vector<uint8_t>(lst[a].data(), lst[a].data()+lst[a].size());
+        } else {
+            return static_cast<typename T::value_type>(lst[a]);
+        }
     } else {
         return this->unmanaged[a];
     }
@@ -804,7 +813,11 @@ rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>)
 {
     if (a.should_detect_usage_for_queries) {
         auto query = Query(a.query->get_table());
-        query.equal(a.managed, b);
+        if constexpr (std::is_enum<T>::value) {
+            query.equal(a.managed, static_cast<std::underlying_type_t<T>>(b));
+        } else {
+            query.equal(a.managed, b);
+        }
         return {std::move(query)};
     }
     return *a == b;
@@ -837,7 +850,11 @@ rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>)
 {
     if (a.should_detect_usage_for_queries) {
         auto query = Query(a.query->get_table());
-        query.not_equal(a.managed, b);
+        if constexpr (std::is_enum<T>::value) {
+            query.not_equal(a.managed, static_cast<std::underlying_type_t<T>>(b));
+        } else {
+            query.not_equal(a.managed, b);
+        }
         return {std::move(query)};
     }
     return !(a == b);
@@ -949,7 +966,11 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator <(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        query.less(this->managed, a);
+        if constexpr (std::is_enum<T>::value) {
+            query.less(this->managed, static_cast<std::underlying_type_t<T>>(a));
+        } else {
+            query.less(this->managed, a);
+        }
         return {std::move(query)};
     }
     return **this < a;
@@ -958,7 +979,11 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator >(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        query.greater(this->managed, a);
+        if constexpr (std::is_enum<T>::value) {
+            query.greater(this->managed, static_cast<std::underlying_type_t<T>>(a));
+        } else {
+            query.greater(this->managed, a);
+        }
         return {std::move(query)};
     }
     return **this > a;
@@ -967,7 +992,11 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator <=(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        query.less_equal(this->managed, a);
+        if constexpr (std::is_enum<T>::value) {
+            query.less_equal(this->managed, static_cast<std::underlying_type_t<T>>(a));
+        } else {
+            query.less_equal(this->managed, a);
+        }
         return {std::move(query)};
     }
     return **this <= a;
@@ -976,7 +1005,11 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator >=(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        query.greater_equal(this->managed, a);
+        if constexpr (std::is_enum<T>::value) {
+            query.greater_equal(this->managed, static_cast<std::underlying_type_t<T>>(a));
+        } else {
+            query.greater_equal(this->managed, a);
+        }
         return {std::move(query)};
     }
     return **this >= a;

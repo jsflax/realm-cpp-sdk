@@ -51,14 +51,19 @@ struct AllTypesObject: realm::object {
     realm::persisted<std::vector<AllTypesObjectLink>> list_obj_col;
 
     using schema = realm::schema<
-            "AllTypesObject",
-            realm::property<"_id", &AllTypesObject::_id, true>,
-            realm::property<"str_col", &AllTypesObject::str_col>,
-            realm::property<"date_col", &AllTypesObject::date_col>,
-            realm::property<"uuid_col", &AllTypesObject::uuid_col>,
-            realm::property<"binary_col", &AllTypesObject::binary_col>,
-            realm::property<"list_int_col", &AllTypesObject::list_int_col>,
-            realm::property<"list_obj_col", &AllTypesObject::list_obj_col>>;
+    "AllTypesObject",
+    realm::property<"_id", &AllTypesObject::_id, true>,
+    realm::property<"str_col", &AllTypesObject::str_col>,
+    realm::property<"enum_col", &AllTypesObject::enum_col>,
+    realm::property<"date_col", &AllTypesObject::date_col>,
+    realm::property<"uuid_col", &AllTypesObject::uuid_col>,
+    realm::property<"binary_col", &AllTypesObject::binary_col>,
+    realm::property<"list_int_col", &AllTypesObject::list_int_col>,
+    realm::property<"list_str_col", &AllTypesObject::list_str_col>,
+    realm::property<"list_uuid_col", &AllTypesObject::list_uuid_col>,
+    realm::property<"list_binary_col", &AllTypesObject::list_binary_col>,
+    realm::property<"list_date_col", &AllTypesObject::list_date_col>,
+    realm::property<"list_obj_col", &AllTypesObject::list_obj_col>>;
 };
 
 

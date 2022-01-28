@@ -13,35 +13,6 @@
 
 using namespace realm;
 
-
-TEST(type_safe_query) {
-    auto realm = realm::open<Person, Dog>({.path=path});
-
-    auto person = Person { .name = "John", .age = 42 };
-    realm.write([&realm, &person](){
-        realm.add(person);
-    });
-
-    auto results = realm.objects<Person>().where([](Person& person) {
-        return person.age > 42;
-    });
-    CHECK_EQUALS(results.size(), 0);
-    results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 42;
-    });
-    CHECK_EQUALS(results.size(), 1);
-    results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 42 && person.name != "John";
-    });
-    CHECK_EQUALS(results.size(), 0);
-
-    results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 42 && person.name.contains("oh");
-    });
-    CHECK_EQUALS(results.size(), 1);
-    co_return;
-}
-
 template<type_info::ObjectPersistable Cls, type_info::ObjectPersistable ...Ts>
 bool validate_equals(db<Ts...>& realm, u_int equal_count, std::function<rbool(Cls&)> expr) {
     auto results = realm.template objects<Cls>().where([expr](auto& obj) {
@@ -86,8 +57,8 @@ TEST(tsq_basic_comparison) {
     validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.str_col != "foo bar"; });
     validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.binary_col == std::vector<u_int8_t>({0, 1, 2, 3}); });
     validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.binary_col != std::vector<u_int8_t>({0, 1, 2, 3}); });
-//    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col == AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col != AllTypesObject::Enum::two; });
+    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col == AllTypesObject::Enum::two; });
+    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col != AllTypesObject::Enum::two; });
     validate_equals<AllTypesObject>(realm, 1U, [&date](auto& o) { return o.date_col == std::chrono::system_clock::from_time_t(date); });
     validate_equals<AllTypesObject>(realm, 0U, [&date](auto& o) { return o.date_col != std::chrono::system_clock::from_time_t(date); });
     validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.uuid_col == realm::uuid("18de7916-7f84-11ec-a8a3-0242ac120002"); });
@@ -101,8 +72,8 @@ TEST(tsq_basic_comparison) {
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.str_col != obj2.str_col; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.binary_col == obj2.binary_col; });
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.binary_col != obj2.binary_col; });
-//    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col == obj2.enum_col; });
-//    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col != obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col == obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col != obj2.enum_col; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.date_col == obj2.date_col; });
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.date_col != obj2.date_col; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.uuid_col == obj2.uuid_col; });
@@ -140,33 +111,63 @@ TEST(tsq_greater_less_than) {
     auto obj2 = create_obj();
 
     // With literal as RHS.
-
     validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o._id > 123; });
     validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o._id >= 123; });
     validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o._id < 123; });
     validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o._id <= 123; });
-//    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col > AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col >= AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col < AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col <= AllTypesObject::Enum::two; });
+    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col > AllTypesObject::Enum::two; });
+    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col >= AllTypesObject::Enum::two; });
+    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col < AllTypesObject::Enum::two; });
+    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col <= AllTypesObject::Enum::two; });
     validate_equals<AllTypesObject>(realm, 0U, [&date](auto& o) { return o.date_col > std::chrono::system_clock::from_time_t(date); });
     validate_equals<AllTypesObject>(realm, 1U, [&date](auto& o) { return o.date_col >= std::chrono::system_clock::from_time_t(date); });
     validate_equals<AllTypesObject>(realm, 0U, [&date](auto& o) { return o.date_col < std::chrono::system_clock::from_time_t(date); });
     validate_equals<AllTypesObject>(realm, 1U, [&date](auto& o) { return o.date_col <= std::chrono::system_clock::from_time_t(date); });
 
     // With col as RHS.
-    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o._id > o._id; });
-    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o._id >= o._id; });
-    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o._id < o._id; });
-    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o._id <= o._id; });
-//    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col > AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 1U, [](auto& o) { return o.enum_col >= AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col < AllTypesObject::Enum::two; });
-//    validate_equals<AllTypesObject>(realm, 0U, [](auto& o) { return o.enum_col <= AllTypesObject::Enum::two; });
-    validate_equals<AllTypesObject>(realm, 0U, [&date](auto& o) { return o.date_col > o.date_col; });
-    validate_equals<AllTypesObject>(realm, 1U, [&date](auto& o) { return o.date_col >= o.date_col; });
-    validate_equals<AllTypesObject>(realm, 0U, [&date](auto& o) { return o.date_col < o.date_col; });
-    validate_equals<AllTypesObject>(realm, 1U, [&date](auto& o) { return o.date_col <= o.date_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o._id > obj2._id; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o._id >= obj2._id; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o._id < obj2._id; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o._id <= obj2._id; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col > obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col >= obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col < obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col <= obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&date, &obj2](auto& o) { return o.date_col > obj2.date_col; });
+    validate_equals<AllTypesObject>(realm, 1U, [&date, &obj2](auto& o) { return o.date_col >= obj2.date_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&date, &obj2](auto& o) { return o.date_col < obj2.date_col; });
+    validate_equals<AllTypesObject>(realm, 1U, [&date, &obj2](auto& o) { return o.date_col <= obj2.date_col; });
+
+    co_return;
+}
+
+TEST(tsq_compound) {
+    auto realm = realm::open<Person, Dog>({.path=path});
+
+    auto person = Person { .name = "John", .age = 42 };
+    realm.write([&realm, &person](){
+        realm.add(person);
+    });
+
+    auto results = realm.objects<Person>().where([](auto& person) {
+        return person.age == 42 && person.name != "John";
+    });
+    CHECK_EQUALS(results.size(), 0);
+
+    results = realm.objects<Person>().where([](auto& person) {
+        return person.age == 42 && person.name.contains("oh");
+    });
+    CHECK_EQUALS(results.size(), 1);
+
+    results = realm.objects<Person>().where([](auto& person) {
+        return person.age == 100 || person.name != "John";
+    });
+    CHECK_EQUALS(results.size(), 1);
+
+    results = realm.objects<Person>().where([](auto& person) {
+        return person.age == 100 || person.name.contains("oh") && person.name != "Foo";
+    });
+    CHECK_EQUALS(results.size(), 1);
 
     co_return;
 }
