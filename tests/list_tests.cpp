@@ -58,7 +58,7 @@ TEST(list_insert_remove_primitive) {
     CHECK_EQUALS(obj.list_int_col.size(), 0);
     obj.list_int_col.push_back(2);
     obj.list_int_col.push_back(4);
-//    CHECK_EQUALS(obj.list_int_col.find(4), 1);
+    CHECK_EQUALS(obj.list_int_col.find(4), 1);
     CHECK_EQUALS(obj.list_int_col[1], 4);
 
     auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>({.path=path});
@@ -76,14 +76,14 @@ TEST(list_insert_remove_primitive) {
         obj.list_int_col.push_back(1);
     });
     CHECK_EQUALS(obj.list_int_col.size(), 3);
-//    CHECK_EQUALS(obj.list_int_col.find(1), 2);
+    CHECK_EQUALS(obj.list_int_col.find(1), 2);
     CHECK_EQUALS(obj.list_int_col[2], 1);
 
     realm.write([&realm, &obj] {
         obj.list_int_col.pop_back();
     });
     CHECK_EQUALS(obj.list_int_col.size(), 2);
-//    CHECK_EQUALS(obj.list_int_col.find(1), UINTMAX_MAX);
+    CHECK_EQUALS(obj.list_int_col.find(1), realm::npos);
 
     realm.write([&realm, &obj] {
         obj.list_int_col.erase(0);
@@ -134,8 +134,9 @@ TEST(list_insert_remove_object) {
     obj.list_obj_col.push_back(o2);
     obj.list_obj_col.push_back(o3);
     obj.list_obj_col.push_back(o4);
-//    CHECK_EQUALS(obj.list_obj_col.find(o4), 0);
-    CHECK_EQUALS(obj.list_obj_col[1], o5);
+
+    CHECK_EQUALS(obj.list_obj_col.find(o4), realm::npos);
+    CHECK_EQUALS(obj.list_obj_col[3].str_col, o4.str_col);
 
     auto realm = realm::open<AllTypesObject, AllTypesObjectLink, Dog>({.path=path});
     realm.write([&realm, &obj] {
@@ -155,14 +156,14 @@ TEST(list_insert_remove_object) {
     CHECK_EQUALS(o5.is_managed(), true);
 
     CHECK_EQUALS(obj.list_obj_col.size(), 5);
-//    CHECK_EQUALS(obj.list_obj_col.find(o5), 4);
-    CHECK_EQUALS(obj.list_obj_col[2], o1);
+    CHECK_EQUALS(obj.list_obj_col.find(o5), 4);
+    CHECK_EQUALS(obj.list_obj_col[4], o5);
 
     realm.write([&obj] {
         obj.list_obj_col.pop_back();
     });
     CHECK_EQUALS(obj.list_obj_col.size(), 4);
-//    CHECK_EQUALS(obj.list_obj_col.find(o5), UINTMAX_MAX);
+    CHECK_EQUALS(obj.list_obj_col.find(o5), realm::npos);
 
     realm.write([&realm, &obj] {
         obj.list_obj_col.erase(0);
@@ -304,7 +305,7 @@ void test_list(Col& list, std::vector<Value> values, auto& realm, auto& obj) {
     CHECK_EQUALS(list.size(), 0);
     list.push_back(values[0]);
     list.push_back(values[1]);
-//    CHECK_EQUALS(list.find(values[1]), 1);
+    CHECK_EQUALS(list.find(values[1]), 1);
     CHECK_EQUALS(list[1], values[1]);
 
     realm.write([&realm, &obj] {
@@ -319,7 +320,7 @@ void test_list(Col& list, std::vector<Value> values, auto& realm, auto& obj) {
         list.push_back(values[0]);
     });
     CHECK_EQUALS(list.size(), 3);
-//    CHECK_EQUALS(list.find(values[1]), 1);
+    CHECK_EQUALS(list.find(values[1]), 1);
     CHECK_EQUALS(list[2], values[0]);
 
     realm.write([&list] {
@@ -352,7 +353,7 @@ TEST(list_all_primitive_types) {
     test_list(binary_list_obj.list_binary_col, std::vector<std::vector<uint8_t>>({{0}, {1}}), realm, binary_list_obj);
     auto date_list_obj = AllTypesObject();
     auto date1 = std::chrono::system_clock::now();
-    auto date2 = std::chrono::system_clock::now();
+    auto date2 = date1 + std::chrono::hours(24);
     test_list(date_list_obj.list_date_col, std::vector<std::chrono::time_point<std::chrono::system_clock>>({date1, date2}), realm, date_list_obj);
     co_return;
 }

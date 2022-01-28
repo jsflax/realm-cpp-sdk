@@ -77,7 +77,11 @@ struct property {
     }
 
     static void assign(Class& object, ColKey col_key, SharedRealm realm) {
-        (object.*Ptr).assign(*object.m_obj, col_key, realm);
+        if constexpr (type_info::ListPersistable<Result>) {
+            (object.*Ptr).assign(*object.m_obj, col_key, realm);
+        } else {
+            (object.*Ptr).assign(*object.m_obj, col_key);
+        }
     }
 
     static void set(Class& object, ColKey col_key) {

@@ -194,8 +194,7 @@ static constexpr typename persisted_type<T>::type convert_if_required(const T& a
             return value.m_obj->get_key();
         } else if constexpr (BinaryPersistableList<T>) {
             return BinaryData(reinterpret_cast<const char *>(value.data()), value.size());
-        }
-        else {
+        } else {
             return static_cast<typename persisted_type<typename T::value_type>::type>(value);
         }
     });

@@ -43,7 +43,6 @@ concept Equatable = requires (T a) {
 };
 
 class rbool;
-//struct notification_token;
 
 template <realm::type_info::Persistable T>
 struct persisted_base {
@@ -85,9 +84,8 @@ protected:
     template <type_info::TimestampPersistable X, typename U, typename V>
     friend persisted<X>& operator +=(persisted<X>& a, std::chrono::duration<U, V> b);
     type as_core_type() const;
-    void assign(const Obj& object, const ColKey& col_key, SharedRealm);
+    void assign(const Obj& object, const ColKey& col_key);
     std::optional<Obj> m_obj;
-    SharedRealm m_realm;
 
     // MARK: Queries
     bool should_detect_usage_for_queries = false;
@@ -100,18 +98,13 @@ protected:
         query = &query_builder;
     }
 
-
     template <realm::type_info::Persistable V>
-    friend rbool operator==(const persisted<V>& a, const V& b) requires (Equatable<V>);
-    template <realm::type_info::BinaryPersistable V>
     friend rbool operator==(const persisted<V>& a, const V& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const persisted<V>& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator==(const persisted<V>& a, const char* b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
-    friend rbool operator!=(const persisted<V>& a, const V& b) requires (Equatable<V>);
-    template <realm::type_info::BinaryPersistable V>
     friend rbool operator!=(const persisted<V>& a, const V& b) requires (Equatable<V>);
     template <realm::type_info::Persistable V>
     friend rbool operator!=(const persisted<V>& a, const persisted<V>& b) requires (Equatable<V>);
@@ -313,24 +306,26 @@ public:
 
     size_t find(const value_type& a) requires (type_info::PrimitivePersistable<value_type>);
     size_t find(const value_type& a) requires (type_info::ObjectPersistable<value_type>);
-    size_t find(value_type&& a) requires (type_info::ObjectPersistable<value_type>);
 
     notification_token observe(util::UniqueFunction<void(persisted<T>&,
                                                          CollectionChange,
                                                          std::exception_ptr)>);
+
+    /// Make this container property managed
+    /// @param object The parent object
+    /// @param col_key The column key for this property
+    /// @param realm The Realm instance managing the parent.
+    void assign(const Obj& object, const ColKey& col_key, SharedRealm realm);
+
+private:
+    SharedRealm m_realm;
 };
 
 template <realm::type_info::ListPersistable T>
 void persisted_container_base<T>::push_back(const typename T::value_type& a) requires (type_info::PrimitivePersistable<typename T::value_type>) {
     if (this->m_obj) {
         auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
-        if constexpr (type_info::BinaryPersistable<typename T::value_type>) {
-            BinaryData core_type = BinaryData(reinterpret_cast<const char *>(a.data()), a.size());
-            lst.add(core_type);
-        } else {
-            auto as_core_type = static_cast<typename type_info::persisted_type<typename T::value_type>::type>(a);
-            lst.add(as_core_type);
-        }
+        lst.add(type_info::convert_if_required<typename T::value_type>(a));
     } else {
         this->unmanaged.push_back(a);
     }
@@ -353,7 +348,11 @@ requires (type_info::ObjectPersistable<typename T::value_type>) {
 template <realm::type_info::ListPersistable T>
 void persisted_container_base<T>::push_back(typename T::value_type&& a)
 requires (type_info::ObjectPersistable<typename T::value_type>) {
-    push_back(a);
+    if (this->m_obj) {
+        push_back(a);
+    } else {
+        this->unmanaged.push_back(std::move(a));
+    }
 }
 
 template <realm::type_info::ListPersistable T>
@@ -385,7 +384,11 @@ requires (type_info::ObjectPersistable<typename T::value_type>) {
 template <realm::type_info::ListPersistable T>
 void persisted_container_base<T>::set(size_type pos, typename T::value_type&& a)
 requires (type_info::ObjectPersistable<typename T::value_type>) {
-    set(pos, a);
+    if (this->m_obj) {
+        set(pos, a);
+    } else {
+        this->unmanaged[pos] = std::move(a);
+    }
 }
 
 template <realm::type_info::ListPersistable T>
@@ -393,14 +396,14 @@ size_t persisted_container_base<T>::find(const typename T::value_type& a) requir
     if (this->m_obj) {
         auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
         if (auto size = lst.size()) {
-            return lst.find_first(a);
+            return lst.find_first(type_info::convert_if_required<typename T::value_type>(a));
         }
     } else {
         auto it = std::find(this->unmanaged.begin(), this->unmanaged.end(), a);
         if (it != this->unmanaged.end()) {
           return std::distance(this->unmanaged.begin(), it);
         } else {
-            return UINTMAX_MAX;
+            return realm::npos;
         }
     }
 }
@@ -410,26 +413,16 @@ size_t persisted_container_base<T>::find(const typename T::value_type& a)
 requires (type_info::ObjectPersistable<typename T::value_type>) {
     if (this->m_obj) {
         if (!a.m_obj.has_value()) {
-            return UINTMAX_MAX;
+            return realm::npos;
         }
         auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
         if (auto size = lst.size()) {
             return lst.find_first((*a.m_obj).get_key());
         }
     } else {
-        auto it = std::find(this->unmanaged.begin(), this->unmanaged.end(), a);
-        if (it != this->unmanaged.end()) {
-          return std::distance(this->unmanaged.begin(), it);
-        } else {
-            return UINTMAX_MAX;
-        }
+        // unmanaged objects in vectors aren't equatable.
+        return realm::npos;
     }
-}
-
-template <realm::type_info::ListPersistable T>
-size_t persisted_container_base<T>::find(typename T::value_type&& a)
-requires (type_info::ObjectPersistable<typename T::value_type>) {
-    return find(a);
 }
 
 template <realm::type_info::ListPersistable T>
@@ -437,7 +430,7 @@ void persisted_container_base<T>::pop_back() {
     if (this->m_obj) {
         auto lst = this->m_obj->template get_list<typename type_info::persisted_type<typename T::value_type>::type>(this->managed);
         if (auto size = lst.size()) {
-            lst.remove(size-1);
+            lst.remove(size - 1);
         }
     } else {
         this->unmanaged.pop_back();
@@ -612,14 +605,18 @@ persisted_base<T>::persisted_base(std::optional<S> value) {
 template <realm::type_info::Persistable T>
 persisted_base<T>::~persisted_base()
 {
-    if constexpr (realm::type_info::property_type<T>() == PropertyType::String) {
+    if (should_detect_usage_for_queries) {
+        return;
+    }
+    if constexpr (type_info::ListPersistable<T>) {
+        using std::vector;
+        if (!m_obj) {
+            unmanaged.clear();
+        }
+    } else if constexpr (realm::type_info::property_type<T>() == PropertyType::String) {
         using std::string;
         if (!m_obj) {
-            if constexpr(std::is_same_v<T, std::vector<std::string>>) {
-                // TODO: do we need to clear the vector?
-            } else {
-                    unmanaged.~string();
-            }
+            unmanaged.~string();
         }
     }
 }
@@ -759,8 +756,6 @@ class rbool {
     friend rbool operator &&(const rbool& lhs, const rbool& rhs);
     template <realm::type_info::Persistable T>
     friend rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>);
-    template <realm::type_info::BinaryPersistable T>
-    friend rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
     friend rbool operator==(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
@@ -772,8 +767,6 @@ class rbool {
     friend struct results;
 
     template <realm::type_info::Persistable T>
-    friend rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>);
-    template <realm::type_info::BinaryPersistable T>
     friend rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>);
     template <realm::type_info::Persistable T>
     friend rbool operator!=(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>);
@@ -813,22 +806,7 @@ rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>)
 {
     if (a.should_detect_usage_for_queries) {
         auto query = Query(a.query->get_table());
-        if constexpr (std::is_enum<T>::value) {
-            query.equal(a.managed, static_cast<std::underlying_type_t<T>>(b));
-        } else {
-            query.equal(a.managed, b);
-        }
-        return {std::move(query)};
-    }
-    return *a == b;
-}
-
-template <realm::type_info::BinaryPersistable T>
-rbool operator==(const persisted<T>& a, const T& b) requires (Equatable<T>)
-{
-    if (a.should_detect_usage_for_queries) {
-        auto query = Query(a.query->get_table());
-        query.equal(a.managed, BinaryData(reinterpret_cast<const char *>(b.data()), b.size()));
+        query.equal(a.managed, type_info::convert_if_required<T>(b));
         return {std::move(query)};
     }
     return *a == b;
@@ -850,25 +828,12 @@ rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>)
 {
     if (a.should_detect_usage_for_queries) {
         auto query = Query(a.query->get_table());
-        if constexpr (std::is_enum<T>::value) {
-            query.not_equal(a.managed, static_cast<std::underlying_type_t<T>>(b));
-        } else {
-            query.not_equal(a.managed, b);
-        }
+        query.not_equal(a.managed, type_info::convert_if_required<T >(b));
         return {std::move(query)};
     }
     return !(a == b);
 }
-template <realm::type_info::BinaryPersistable T>
-rbool operator!=(const persisted<T>& a, const T& b) requires (Equatable<T>)
-{
-    if (a.should_detect_usage_for_queries) {
-        auto query = Query(a.query->get_table());
-        query.equal(a.managed, BinaryData(reinterpret_cast<const char *>(b.data()), b.size()));
-        return {std::move(query)};
-    }
-    return !(a == b);
-}
+
 template <realm::type_info::Persistable T>
 rbool operator!=(const persisted<T>& a, const persisted<T>& b) requires (Equatable<T>)
 {
@@ -966,11 +931,7 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator <(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        if constexpr (std::is_enum<T>::value) {
-            query.less(this->managed, static_cast<std::underlying_type_t<T>>(a));
-        } else {
-            query.less(this->managed, a);
-        }
+        query.less(this->managed, type_info::convert_if_required<T >(a));
         return {std::move(query)};
     }
     return **this < a;
@@ -979,11 +940,7 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator >(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        if constexpr (std::is_enum<T>::value) {
-            query.greater(this->managed, static_cast<std::underlying_type_t<T>>(a));
-        } else {
-            query.greater(this->managed, a);
-        }
+        query.greater(this->managed, type_info::convert_if_required<T >(a));
         return {std::move(query)};
     }
     return **this > a;
@@ -992,11 +949,7 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator <=(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        if constexpr (std::is_enum<T>::value) {
-            query.less_equal(this->managed, static_cast<std::underlying_type_t<T>>(a));
-        } else {
-            query.less_equal(this->managed, a);
-        }
+        query.less_equal(this->managed, type_info::convert_if_required<T >(a));
         return {std::move(query)};
     }
     return **this <= a;
@@ -1005,11 +958,7 @@ template <realm::type_info::NonContainerPersistable T>
 rbool persisted_noncontainer_base<T>::operator >=(const T& a) requires (type_info::Comparable<T>) {
     if (this->should_detect_usage_for_queries) {
         auto query = Query(this->query->get_table());
-        if constexpr (std::is_enum<T>::value) {
-            query.greater_equal(this->managed, static_cast<std::underlying_type_t<T>>(a));
-        } else {
-            query.greater_equal(this->managed, a);
-        }
+        query.greater_equal(this->managed, type_info::convert_if_required<T >(a));
         return {std::move(query)};
     }
     return **this >= a;
@@ -1067,10 +1016,16 @@ rbool persisted_noncontainer_base<T>::contains(const char *str) requires(std::is
 }
 
 template <realm::type_info::Persistable T>
-void persisted_base<T>::assign(const Obj& object, const ColKey& col_key, SharedRealm realm) {
+void persisted_base<T>::assign(const Obj& object, const ColKey& col_key) {
     m_obj = object;
-    m_realm = realm;
     new (&managed) ColKey(col_key);
+}
+
+template <realm::type_info::ListPersistable T>
+void persisted_container_base<T>::assign(const Obj& object, const ColKey& col_key, SharedRealm realm) {
+    this->m_obj = object;
+    this->m_realm = realm;
+    new (&this->managed) ColKey(col_key);
 }
 
 template <realm::type_info::Persistable T>
@@ -1079,12 +1034,26 @@ std::ostream& operator<< (std::ostream& stream, const persisted<T>& value)
     stream << *value;
 }
 
-template <realm::type_info::Persistable T>
+template <realm::type_info::ObjectPersistable T>
 std::ostream& operator<< (std::ostream& stream, const T& object)
 {
+    if (object.m_obj) {
+        return stream << *object.m_obj;
+    }
+
+    std::apply([&stream, &object](auto&&... props) {
+        stream << "{\n";
+        ((stream << "\t" << props.name << ": " << *(object.*props.ptr) << "\n"), ...);
+        stream << "}";
+    }, T::schema::properties);
+
     return stream;
-//    stream << "object";
-    
+}
+
+template <realm::type_info::BinaryPersistable T>
+std::ostream& operator<< (std::ostream& stream, const T& binary)
+{
+    return stream << binary;
 }
 
 }

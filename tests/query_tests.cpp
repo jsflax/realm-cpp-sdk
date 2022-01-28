@@ -1,10 +1,3 @@
-//
-//  query_tests.cpp
-//  
-//
-//  Created by Lee Maguire on 27/01/2022.
-//
-
 #include <stdio.h>
 
 #include "test_utils.hpp"
@@ -129,10 +122,10 @@ TEST(tsq_greater_less_than) {
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o._id >= obj2._id; });
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o._id < obj2._id; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o._id <= obj2._id; });
-    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col > obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col > obj2.enum_col; });
     validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col >= obj2.enum_col; });
     validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col < obj2.enum_col; });
-    validate_equals<AllTypesObject>(realm, 0U, [&obj2](auto& o) { return o.enum_col <= obj2.enum_col; });
+    validate_equals<AllTypesObject>(realm, 1U, [&obj2](auto& o) { return o.enum_col <= obj2.enum_col; });
     validate_equals<AllTypesObject>(realm, 0U, [&date, &obj2](auto& o) { return o.date_col > obj2.date_col; });
     validate_equals<AllTypesObject>(realm, 1U, [&date, &obj2](auto& o) { return o.date_col >= obj2.date_col; });
     validate_equals<AllTypesObject>(realm, 0U, [&date, &obj2](auto& o) { return o.date_col < obj2.date_col; });
@@ -160,7 +153,7 @@ TEST(tsq_compound) {
     CHECK_EQUALS(results.size(), 1);
 
     results = realm.objects<Person>().where([](auto& person) {
-        return person.age == 100 || person.name != "John";
+        return person.age == 100 || person.name == "John";
     });
     CHECK_EQUALS(results.size(), 1);
 

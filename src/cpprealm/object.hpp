@@ -173,7 +173,7 @@ struct object {
     template <typename T>
     notification_token observe(std::function<void(ObjectChange<T>)> block);
 
-    bool is_managed() const {
+    bool is_managed() const noexcept {
         return m_obj.has_value();
     }
 
@@ -201,6 +201,8 @@ private:
     friend inline bool operator==(const T& lhs, const T& rhs);
 
     std::shared_ptr<Realm> m_realm = nullptr;
+    template <realm::type_info::ObjectPersistable T>
+    friend std::ostream& operator<< (std::ostream& stream, const T& object);
     std::optional<Obj> m_obj;
 };
 
@@ -209,8 +211,7 @@ inline bool operator==(const T& lhs, const T& rhs) {
     if (lhs.is_managed() && rhs.is_managed()) {
         return *lhs.m_obj == *rhs.m_obj && rhs.m_realm == lhs.m_realm;
     } else if (!lhs.is_managed() && !rhs.is_managed()) {
-        // TODO: the vector doesnt seem to push back by ref?
-        return false;//std::addressof(lhs) == std::addressof(rhs);
+        return false;
     }
     return false;
 };

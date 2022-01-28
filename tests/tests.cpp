@@ -31,9 +31,7 @@ TEST(all) {
     realm.write([&person] {
         person.age += 2;
     });
-    realm.write([] { });
 
-    CHECK_EQUALS(did_run, true);
     CHECK_EQUALS(*person.age, 19);
 
     auto persons = realm.objects<Person>();
@@ -46,6 +44,7 @@ TEST(all) {
             realm.remove(person);
         });
     }
+    CHECK_EQUALS(did_run, true);
 
     CHECK_EQUALS(persons.size(), 0);
     auto app = realm::App("car-wsney");
