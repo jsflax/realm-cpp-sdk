@@ -35,7 +35,6 @@ struct FieldValue;
 template <type_info::Persistable T>
 struct persisted;
 struct notification_token;
-struct CollectionChange;
 
 template <typename T>
 concept Equatable = requires (T a) {
@@ -307,8 +306,7 @@ public:
     size_t find(const value_type& a) requires (type_info::PrimitivePersistable<value_type>);
     size_t find(const value_type& a) requires (type_info::ObjectPersistable<value_type>);
 
-    notification_token observe(util::UniqueFunction<void(persisted<T>&,
-                                                         CollectionChange,
+    notification_token observe(util::UniqueFunction<void(CollectionChange<T>,
                                                          std::exception_ptr)>);
 
     /// Make this container property managed
@@ -486,27 +484,26 @@ requires (type_info::ObjectPersistable<typename T::value_type>) {
 
 template <realm::type_info::ListPersistable T>
 struct CollectionCallbackWrapper {
-    util::UniqueFunction<void(persisted<T>&, CollectionChange, std::exception_ptr err)> handler;
+    util::UniqueFunction<void(CollectionChange<T>, std::exception_ptr err)> handler;
     persisted<T>& collection;
     bool ignoreChangesInInitialNotification;
 
     void operator()(realm::CollectionChangeSet const& changes, std::exception_ptr err) {
         if (err) {
-            handler(collection, {{},{},{}}, err);
+            handler({&collection, {},{},{}}, err);
             return;
         }
 
         if (ignoreChangesInInitialNotification) {
             ignoreChangesInInitialNotification = false;
-            handler(collection, {{},{},{}}, nullptr);
+            handler({&collection, {},{},{}}, nullptr);
         }
         else if (changes.empty()) {
-            handler(collection, {{},{},{}}, nullptr);
+            handler({&collection, {},{},{}}, nullptr);
 
         }
         else if (!changes.collection_root_was_deleted || !changes.deletions.empty()) {
-            handler(collection,
-            {
+            handler({&collection,
                 to_vector(changes.deletions),
                 to_vector(changes.insertions),
                 to_vector(changes.modifications),
@@ -525,8 +522,7 @@ private:
 };
 
 template <realm::type_info::ListPersistable T>
-notification_token persisted_container_base<T>::observe(util::UniqueFunction<void(persisted<T>&,
-                                                                                  CollectionChange,
+notification_token persisted_container_base<T>::observe(util::UniqueFunction<void(CollectionChange<T>,
                                                                                   std::exception_ptr)> handler)
 {
     if (this->m_obj) {

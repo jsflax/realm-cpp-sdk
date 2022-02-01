@@ -33,7 +33,8 @@ namespace realm {
 struct Realm;
 struct NotificationToken;
 struct object;
-
+template <type_info::ListPersistable T>
+struct persisted_container_base;
 /**
  A token which is returned from methods which subscribe to changes to a `realm::object`.
  */
@@ -78,8 +79,10 @@ struct PropertyChange {
     std::optional<std::any> new_value;
 };
 
+template <type_info::ListPersistable T>
 struct CollectionChange {
-
+    /// The list being observed.
+    const persisted_container_base<T>* collection;
     std::vector<uint64_t> deletions;
     std::vector<uint64_t> insertions;
     std::vector<uint64_t> modifications;
