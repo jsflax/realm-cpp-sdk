@@ -91,6 +91,8 @@ struct persisted_type<T> { using type = realm::UUID; };
 
 template <typename T>
 concept BinaryPersistable = std::is_same_v<T, std::vector<std::uint8_t>>;
+template <typename T>
+concept BinaryPersistableList = std::is_same_v<T, std::vector<std::vector<std::uint8_t>>>;
 
 template <BinaryPersistable T>
 struct persisted_type<T> { using type = realm::BinaryData; };
@@ -171,6 +173,8 @@ constexpr typename persisted_type<T>::type convert_if_required(const T& a)
             return BinaryData("");
         }
         return BinaryData(reinterpret_cast<const char *>(a.data()), a.size());
+    } else if constexpr (std::is_enum<T>::value) {
+        return static_cast<std::underlying_type_t<T>>(a);
     } else {
         return a;
     }
@@ -188,12 +192,15 @@ static constexpr typename persisted_type<T>::type convert_if_required(const T& a
     std::transform(a.begin(), a.end(), std::back_inserter(v), [](auto& value) {
         if constexpr (ObjectPersistable<typename T::value_type>) {
             return value.m_obj->get_key();
+        } else if constexpr (BinaryPersistableList<T>) {
+            return BinaryData(reinterpret_cast<const char *>(value.data()), value.size());
         } else {
             return static_cast<typename persisted_type<typename T::value_type>::type>(value);
         }
     });
     return v;
 }
+
 template <typename T>
 static constexpr PropertyType property_type();
 
